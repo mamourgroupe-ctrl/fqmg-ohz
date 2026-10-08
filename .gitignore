@@ -37,3 +37,20 @@ next-env.d.ts
 out/
 .env
 build
+# AI tool local configs
+.claude/
+.qodo/
+.agents/local/
+
+# Remotion output
+.render/
+*.mp4
+!public/**/*.mp4
+
+# Cache
+.turbo/
+.eslintcache
+
+# Backups
+*.bak
+*.backup
