@@ -2,6 +2,13 @@
 
 AI-powered motion graphics generator built with **Remotion** + **Next.js**.
 
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![GitHub last commit](https://img.shields.io/github/last-commit/mamourgroupe-ctrl/fqmg-ohz)
+![GitHub repo size](https://img.shields.io/github/repo-size/mamourgroupe-ctrl/fqmg-ohz)
+![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue)
+
+
 ---
 
 ## Features
@@ -90,3 +97,4 @@ fqmg-ohz/
 ## License
 
 MIT
+
