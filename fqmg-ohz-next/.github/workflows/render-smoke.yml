@@ -1,0 +1,92 @@
+# Manual Remotion render smoke test.
+#
+# Renders 2 seconds (frames 0-59) of the FQMG-OHZ-NEXT-Preview composition at half scale,
+# probes the MP4 with ffprobe, and uploads both files as a workflow artifact.
+#
+# PLACEMENT: GitHub runs only workflows stored in the repository-root .github/workflows/
+# directory. This copy lives in fqmg-ohz-next/.github/workflows/ and is therefore INERT.
+# To run it, move it to <repository-root>/.github/workflows/render-smoke.yml. The steps use
+# working-directory: fqmg-ohz-next, which matches that root location.
+#
+# TRIGGER: workflow_dispatch only (manual). It is not triggered by pushes or pull requests,
+# and it has not been run.
+
+name: Render smoke test (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      chrome_mode:
+        description: >-
+          Browser source for Remotion. headless-shell downloads from remotion.media (default).
+          chrome-for-testing downloads from storage.googleapis.com and enables GPU drivers on Linux.
+        type: choice
+        options:
+          - headless-shell
+          - chrome-for-testing
+        default: headless-shell
+
+permissions:
+  contents: read
+
+jobs:
+  render-smoke:
+    name: Render 2 seconds of FQMG-OHZ-NEXT-Preview
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: fqmg-ohz-next
+    env:
+      CHROME_MODE: ${{ inputs.chrome_mode }}
+      OUTPUT_MP4: renders/render-smoke.mp4
+      OUTPUT_PROBE: renders/render-smoke.ffprobe.json
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fqmg-ohz-next/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Ensure Remotion browser (headless-shell mode)
+        if: ${{ inputs.chrome_mode == 'headless-shell' }}
+        run: npx remotion browser ensure
+
+      - name: Render 2 seconds (frames 0-59, scale 0.5)
+        run: |
+          mkdir -p renders
+          npx remotion render src/remotion/entry.tsx FQMG-OHZ-NEXT-Preview "$OUTPUT_MP4" \
+            --frames=0-59 --scale=0.5 --overwrite --log=verbose --chrome-mode="$CHROME_MODE"
+
+      - name: Probe MP4 with ffprobe
+        run: |
+          set -euo pipefail
+          if ! command -v ffprobe >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          fi
+          test -s "$OUTPUT_MP4"
+          ffprobe -v error -print_format json -show_format -show_streams "$OUTPUT_MP4" > "$OUTPUT_PROBE"
+          jq -e '.format.format_name | test("mp4")' "$OUTPUT_PROBE"
+          jq -e '[.streams[] | select(.codec_type == "video")] | length == 1' "$OUTPUT_PROBE"
+          jq -e '(.format.duration | tonumber) as $d | $d > 1.8 and $d < 2.2' "$OUTPUT_PROBE"
+          jq -r '.streams[] | select(.codec_type == "video") | "codec=\(.codec_name) \(.width)x\(.height) avg_frame_rate=\(.avg_frame_rate)"' "$OUTPUT_PROBE"
+          jq -r '"duration=\(.format.duration)s size_bytes=\(.format.size)"' "$OUTPUT_PROBE"
+
+      - name: Upload MP4 and ffprobe report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: render-smoke-${{ github.run_id }}
+          path: |
+            fqmg-ohz-next/renders/render-smoke.mp4
+            fqmg-ohz-next/renders/render-smoke.ffprobe.json
+          if-no-files-found: warn
+          retention-days: 7

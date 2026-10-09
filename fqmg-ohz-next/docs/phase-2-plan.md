@@ -74,6 +74,7 @@ Only `fqmg-ohz-next/.env.example` is updated for environment configuration; it c
 - `verifyRenderOutput` now resolves Remotion's bundled FFprobe first, then falls back to `ffprobe` on `PATH`. Its success gate still requires a real MP4/WebM file plus a valid ffprobe video stream, dimensions, frame rate, and duration.
 - A one-second synthetic black H.264 MP4 was generated with the bundled FFmpeg and validated with the bundled FFprobe: 1,846 bytes, 160×90, 24 fps, 1.0 second. This validates the media binaries and completion gate only; it is **not** a Remotion project render.
 - **Actual project-render result:** blocked on the missing Chrome Headless Shell. No project render is marked successful. Audio-bearing projects remain fail-closed until actual audio mixing is implemented and tested.
+- **Follow-up (2026-10-09):** the `remotion browser ensure` retry failed again with `ECONNRESET` from `remotion.media`. No system browser is installed, and the apt mirror is unreachable. A Remotion bundle compile check passed; a bundle is not a render. A manual-only workflow was added at `fqmg-ohz-next/.github/workflows/render-smoke.yml`. It is inert until moved to the repository root and has not been run.
 - See [`docs/PHASE2_VERIFICATION.md`](PHASE2_VERIFICATION.md) for the detailed integration findings, official-provider documentation cross-check, and user actions.
 
 ## 6. Verification record
