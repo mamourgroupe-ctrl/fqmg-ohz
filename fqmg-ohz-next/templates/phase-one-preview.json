@@ -1,0 +1,126 @@
+{
+  "project": {
+    "id": "phase-one-preview",
+    "title": "FQMG-OHZ NEXT — معاينة البداية",
+    "prompt": "ثلاثة مشاهد نموذجية لاختبار مخطط الحركة والعرض في Remotion.",
+    "videoKind": "starter-preview",
+    "language": "ar",
+    "visualStyle": "clean commercial, subject-led"
+  },
+  "composition": {
+    "aspectRatio": "9:16",
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "durationInFrames": 300,
+    "backgroundColor": "#101828"
+  },
+  "scenes": [
+    {
+      "id": "preview-hook",
+      "title": "افتتاحية",
+      "beat": "hook",
+      "startFrame": 0,
+      "durationInFrames": 90,
+      "transition": { "type": "fade", "durationInFrames": 12 },
+      "layers": [
+        {
+          "id": "preview-hook-text",
+          "name": "عنوان الافتتاحية",
+          "type": "text",
+          "content": "من فكرة… إلى حركة",
+          "startFrame": 0,
+          "durationInFrames": 90,
+          "opacity": 1,
+          "layout": { "xPercent": 50, "yPercent": 50, "widthPercent": 88, "heightPercent": 32 },
+          "keyframes": [],
+          "style": {
+            "fontFamily": "Arial, sans-serif",
+            "fontSize": 72,
+            "color": "#FFFFFF",
+            "alignment": "center",
+            "direction": "rtl",
+            "weight": "bold"
+          }
+        }
+      ]
+    },
+    {
+      "id": "preview-solution",
+      "title": "المخطط",
+      "beat": "solution",
+      "startFrame": 90,
+      "durationInFrames": 120,
+      "transition": { "type": "fade", "durationInFrames": 12 },
+      "layers": [
+        {
+          "id": "preview-solution-text",
+          "name": "عنوان الحل",
+          "type": "text",
+          "content": "مخطط حركة موحّد",
+          "startFrame": 0,
+          "durationInFrames": 120,
+          "opacity": 1,
+          "layout": { "xPercent": 50, "yPercent": 50, "widthPercent": 88, "heightPercent": 32 },
+          "keyframes": [],
+          "style": {
+            "fontFamily": "Arial, sans-serif",
+            "fontSize": 72,
+            "color": "#FFFFFF",
+            "alignment": "center",
+            "direction": "rtl",
+            "weight": "bold"
+          }
+        },
+        {
+          "id": "preview-accent-shape",
+          "name": "Accent panel",
+          "type": "shape",
+          "shape": "rectangle",
+          "fillColor": "#F28A45",
+          "startFrame": 12,
+          "durationInFrames": 96,
+          "opacity": 0.9,
+          "layout": { "xPercent": 50, "yPercent": 68, "widthPercent": 48, "heightPercent": 1.2 },
+          "keyframes": [],
+          "strokeWidth": 0,
+          "cornerRadius": 2
+        }
+      ]
+    },
+    {
+      "id": "preview-cta",
+      "title": "الخطوة التالية",
+      "beat": "cta",
+      "startFrame": 210,
+      "durationInFrames": 90,
+      "transition": { "type": "fade", "durationInFrames": 12 },
+      "layers": [
+        {
+          "id": "preview-cta-text",
+          "name": "عنوان ختامي",
+          "type": "text",
+          "content": "ابدأ بمخطط واضح",
+          "startFrame": 0,
+          "durationInFrames": 90,
+          "opacity": 1,
+          "layout": { "xPercent": 50, "yPercent": 50, "widthPercent": 88, "heightPercent": 32 },
+          "keyframes": [],
+          "style": {
+            "fontFamily": "Arial, sans-serif",
+            "fontSize": 72,
+            "color": "#FFFFFF",
+            "alignment": "center",
+            "direction": "rtl",
+            "weight": "bold"
+          }
+        }
+      ]
+    }
+  ],
+  "assets": [],
+  "audio": { "tracks": [], "masterVolume": 1, "normalize": false, "ducking": false },
+  "subtitles": { "enabled": false, "language": "ar", "direction": "rtl", "cues": [] },
+  "branding": { "name": "FQMG-OHZ NEXT", "colors": ["#101828", "#F28A45", "#FFFFFF"], "typography": {}, "rules": [] },
+  "render": { "engine": "remotion", "outputFormat": "mp4", "quality": "preview" }
+}

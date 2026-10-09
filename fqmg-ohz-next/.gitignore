@@ -1,0 +1,13 @@
+node_modules/
+.next/
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+next-env.d.ts
+renders/
+.voice-cache/
+coverage/
+dist/
+build/
+.DS_Store
