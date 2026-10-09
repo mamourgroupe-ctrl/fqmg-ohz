@@ -11,7 +11,7 @@
 - **Delivered instead:** a manual-only GitHub Actions smoke workflow at `fqmg-ohz-next/.github/workflows/render-smoke.yml`. It is inert until moved to the repository root, and it has not been run.
 - **Bundle check:** `remotion bundle src/remotion/entry.tsx` exited 0. This shows the composition compiles through Remotion's bundler. It is not a render.
 - **Providers:** no credentials, no live inventory, no synthesis. **No Algerian Arabic voice is verified.**
-- **Azure live voice check (prepared, not run):** `npm run voice:live-check` runs an inventory, an auth check that compares the two header forms, one Arabic synthesis, and an ffprobe verification. It needs `AZURE_SPEECH_KEY` and either `AZURE_SPEECH_REGION` or `AZURE_SPEECH_ENDPOINT`. It makes real billable requests, so it has not been run. The manual workflow is `fqmg-ohz-next/.github/workflows/voice-live-check.yml`, inert until moved to the repository root. Steps are in [Live voice check (Azure)](#live-voice-check-azure-prepared-not-run).
+- **Azure live voice check (prepared, not run):** `npm run voice:live-check` runs an inventory, an auth check that compares the two header forms, one Arabic synthesis, and an ffprobe verification. It needs `AZURE_SPEECH_KEY` and either `AZURE_SPEECH_REGION` or `AZURE_SPEECH_ENDPOINT`. It makes real requests to your Azure resource, so it has not been run. The manual workflow is `fqmg-ohz-next/.github/workflows/voice-live-check.yml`, inert until moved to the repository root. Steps are in [Live voice check (Azure)](#live-voice-check-azure-prepared-not-run).
 - **Issues to act on:**
   - OpenAI's model page labels GPT-4o Mini TTS "Deprecated" and states a 2,000-input-token maximum that the adapter does not enforce.
   - ElevenLabs no longer receives `language_code` for any model, which gives up language enforcement on models that accept it.
@@ -273,7 +273,7 @@ Only presence checks were made. No secret value was printed or stored.
 
 ### Requests and cost
 
-A passing run makes about 7 requests to a regional endpoint, or about 8 to a custom-subdomain endpoint: one inventory call, one token request, two voice-list calls, two or three one-word synthesis probes, and one sentence synthesis. The exact count depends on the endpoint type and on whether the token step succeeds. Charges depend on the account's Azure pricing. This report does not state prices.
+A passing run makes about 7 requests to a regional endpoint, or about 8 to a custom-subdomain endpoint: one inventory call, one token request, two voice-list calls, two or three one-word synthesis probes, and one sentence synthesis. The exact count depends on the endpoint type and on whether the token step succeeds. Whether any of these calls is charged depends on the account's Azure pricing. This report does not state prices, and it did not verify which calls are metered.
 
 ### Exact user steps (names only; never paste values into chat)
 
