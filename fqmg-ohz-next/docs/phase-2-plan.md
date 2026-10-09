@@ -81,11 +81,11 @@ Only `fqmg-ohz-next/.env.example` is updated for environment configuration; it c
 
 Fixture/unit coverage includes request/contract validation, all four isolated provider adapters, malformed/provider failure handling, locale/dialect evidence and AUTO failure/fallback, pin persistence/concurrency/conflicts, cache identity/TTL/size/concurrency/tamper cases, safe audio references, API envelope/body limits, project-model attachment, preview compatibility, and fail-closed render validation.
 
-- `npm test`: **passed — 112 tests across 15 files** (84 earlier, plus 28 for the live check; 9 of the 28 are MOCK, and 1 uses the real local ffprobe).
+- `npm test`: **passed — 119 tests across 15 files** (84 earlier, plus 35 for the live check; 13 of the 35 are MOCK, and 1 uses the real local ffprobe).
 - `npm run typecheck`: **passed**.
 - `npm run lint`: **passed**.
 - `npm run build`: **passed**; Next lists the planner and all voice API routes.
-- Live provider/authenticated inventory result: **not tested**; no configured credentials were found and adapter tests use fixtures. An Azure live check is prepared (`npm run voice:live-check`, plus a manual workflow at `fqmg-ohz-next/.github/workflows/voice-live-check.yml`, inert until moved to the repository root). It has **not been run**, and no provider was called.
+- Live provider/authenticated inventory result: **not tested**; no configured credentials were found and adapter tests use fixtures. An Azure live check is prepared. `npm run voice:live-check:plan` prints the requests with no network call, and `npm run voice:live-check` runs the check. The primary route is a manual GitHub Actions workflow at `fqmg-ohz-next/.github/workflows/voice-live-check.yml`, which is inert until it is placed at the repository root and on the default branch `main`. The check has **not been run**, and no provider was called.
 - Verified Algerian voice result: **none verified for this application**; strict AUTO remains fail-closed absent evidence. This is not a claim that providers globally lack Algerian Arabic.
 - Synthetic MP4 smoke test: **passed and ffprobe-validated**. Remotion composition render: **not rendered**, blocked on Chrome Headless Shell.
 

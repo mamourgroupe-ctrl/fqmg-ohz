@@ -16,7 +16,8 @@
     "studio": "remotion studio src/remotion/entry.tsx",
     "bundle:remotion": "remotion bundle src/remotion/entry.tsx",
     "render:preview": "remotion render src/remotion/entry.tsx FQMG-OHZ-NEXT-Preview renders/phase-one-preview.mp4",
-    "voice:live-check": "tsx scripts/voice-live-check.ts"
+    "voice:live-check": "tsx scripts/voice-live-check.ts",
+    "voice:live-check:plan": "tsx scripts/voice-live-check.ts --plan"
   },
   "dependencies": {
     "@remotion/renderer": "4.0.534",

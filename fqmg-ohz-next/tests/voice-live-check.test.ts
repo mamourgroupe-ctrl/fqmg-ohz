@@ -10,6 +10,7 @@ import {
   SUMMARY_FILE_NAME,
   INVENTORY_FILE_NAME,
   buildAudioFileName,
+  buildLivePlanLines,
   buildProbeSsml,
   classifyHttpStatus,
   deriveTokenIssuanceUrl,
@@ -20,7 +21,9 @@ import {
   getAzureRoutes,
   isAlgerianLocale,
   isArabicLocale,
+  looksLikeKeyMisplacement,
   parseFfprobeReport,
+  parseVoiceLiveCheckArgs,
   probeAudioWithFfprobe,
   redactSecrets,
   resolveLiveProvider,
@@ -267,6 +270,54 @@ describe("voice live check pure logic (not provider proof)", () => {
       .toContain("/cognitiveservices/v1");
     expect(diagnoseAuth({ voiceAvailable: false, adapterPathKey: "not-run", adapterPathBearer: "not-run" })).toContain("no Arabic voice");
   });
+
+  it("accepts only --plan, and never echoes a rejected argument", () => {
+    expect(parseVoiceLiveCheckArgs([])).toEqual({ ok: true, plan: false });
+    expect(parseVoiceLiveCheckArgs(["--plan"])).toEqual({ ok: true, plan: true });
+    expect(parseVoiceLiveCheckArgs(["--plan", "--plan"])).toEqual({ ok: true, plan: true });
+    for (const rejected of [["--pln"], ["--confirm"], ["--plan", "extra"], [`--AZURE_SPEECH_KEY=${TEST_KEY}`]]) {
+      const result = parseVoiceLiveCheckArgs(rejected);
+      expect(result.ok).toBe(false);
+      expect(JSON.stringify(result)).not.toContain(TEST_KEY);
+      expect(JSON.stringify(result)).not.toContain("AZURE_SPEECH_KEY");
+      expect(JSON.stringify(result)).not.toContain("extra");
+      expect(JSON.stringify(result)).not.toContain("--pln");
+      expect(JSON.stringify(result)).not.toContain("--confirm");
+    }
+  });
+
+  it("flags a key in the region or endpoint, or a key-shaped label, but not a normal host", () => {
+    const hexKey = "0123456789abcdef0123456789abcdef";
+    expect(looksLikeKeyMisplacement("", TEST_KEY)).toBe(false);
+    expect(looksLikeKeyMisplacement("eastus", TEST_KEY)).toBe(false);
+    expect(looksLikeKeyMisplacement("eastus", "")).toBe(false);
+    expect(looksLikeKeyMisplacement("https://demo-resource.cognitiveservices.azure.com", TEST_KEY)).toBe(false);
+    expect(looksLikeKeyMisplacement(hexKey, TEST_KEY)).toBe(true);
+    expect(looksLikeKeyMisplacement(`https://${TEST_KEY}.cognitiveservices.azure.com`, TEST_KEY)).toBe(true);
+    expect(looksLikeKeyMisplacement(`https://${hexKey}.cognitiveservices.azure.com`, TEST_KEY)).toBe(true);
+  });
+
+  it("describes a live run from the same routes and counts, with header names and no values", () => {
+    const regional = buildLivePlanLines(getAzureEndpoint({ AZURE_SPEECH_REGION: "eastus" })!).join("\n");
+    expect(regional).toContain("GET https://eastus.tts.speech.microsoft.com/cognitiveservices/voices/list");
+    expect(regional).toContain("POST https://eastus.api.cognitive.microsoft.com/sts/v1.0/issueToken");
+    expect(regional).toContain("POST https://eastus.tts.speech.microsoft.com/cognitiveservices/v1");
+    expect(regional).toContain("Ocp-Apim-Subscription-Key");
+    expect(regional).toContain("Total: at most 7 requests");
+    expect(regional).toContain("at most 50 characters");
+    expect(regional).not.toContain("documented path conflict");
+
+    const resource = buildLivePlanLines(
+      getAzureEndpoint({ AZURE_SPEECH_ENDPOINT: "https://demo-resource.cognitiveservices.azure.com" })!,
+    ).join("\n");
+    expect(resource).toContain("GET https://demo-resource.cognitiveservices.azure.com/tts/cognitiveservices/voices/list");
+    expect(resource).toContain("POST https://demo-resource.cognitiveservices.azure.com/tts/cognitiveservices/v1");
+    expect(resource).toContain("POST https://demo-resource.cognitiveservices.azure.com/cognitiveservices/v1");
+    expect(resource).toContain("documented path conflict");
+    expect(resource).toContain("Total: at most 8 requests");
+    expect(resource).toContain("at most 55 characters");
+    expect(`${regional}\n${resource}`).not.toContain(TEST_KEY);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -378,6 +429,81 @@ describe("voice live check mocked flow (MOCK: fake fetch and probe; not provider
       expect(fake.calls).toEqual([]);
       expect(lines.join("\n")).toContain("shaped like a subscription key");
       expect(lines.join("\n")).not.toContain(misplaced);
+      expect(await readdir(outputDirectory)).toEqual([]);
+    }
+  });
+
+  it("plan mode prints the plan with zero requests and writes no files (MOCK: fetch spy)", async () => {
+    const fake = createFakeAzure({});
+    const outputDirectory = path.join(await makeTemporaryDirectory(), "voice-live-output");
+    const lines: string[] = [];
+    const result = await runVoiceLiveCheck({
+      environment: REGIONAL_ENV,
+      outputDirectory,
+      fetcher: fake.fetcher,
+      probeAudio: passingProbe,
+      log: (line) => lines.push(line),
+      plan: true,
+      now: () => new Date("2026-10-09T10:00:00.000Z"),
+    });
+    const output = lines.join("\n");
+    expect(result.exitCode).toBe(0);
+    expect(fake.calls).toEqual([]);
+    expect(existsSync(outputDirectory)).toBe(false);
+    expect(output).toContain("PLAN ONLY: this mode makes no network request and writes no file.");
+    expect(output).not.toContain(TEST_KEY);
+  });
+
+  it("plan mode accepts a valid custom-subdomain endpoint and still makes no request (MOCK: fetch spy)", async () => {
+    const fake = createFakeAzure({});
+    const outputDirectory = path.join(await makeTemporaryDirectory(), "voice-live-output");
+    const lines: string[] = [];
+    const result = await runVoiceLiveCheck({
+      environment: { AZURE_SPEECH_KEY: TEST_KEY, AZURE_SPEECH_ENDPOINT: "https://demo-resource.cognitiveservices.azure.com", VOICE_PROVIDER: "azure" },
+      outputDirectory,
+      fetcher: fake.fetcher,
+      probeAudio: passingProbe,
+      log: (line) => lines.push(line),
+      plan: true,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(fake.calls).toEqual([]);
+    expect(existsSync(outputDirectory)).toBe(false);
+    expect(lines.join("\n")).toContain("Total: at most 8 requests");
+  });
+
+  it("plan mode still fails closed on bad configuration and prints no plan (MOCK: fetch spy)", async () => {
+    const fake = createFakeAzure({});
+    const outputDirectory = path.join(await makeTemporaryDirectory(), "voice-live-output");
+    const lines: string[] = [];
+    const result = await runVoiceLiveCheck({
+      environment: { VOICE_PROVIDER: "azure" },
+      outputDirectory,
+      fetcher: fake.fetcher,
+      probeAudio: passingProbe,
+      log: (line) => lines.push(line),
+      plan: true,
+    });
+    expect(result.exitCode).toBe(2);
+    expect(fake.calls).toEqual([]);
+    expect(existsSync(outputDirectory)).toBe(false);
+    expect(lines.join("\n")).not.toContain("PLAN ONLY");
+  });
+
+  it("refuses a key placed in the endpoint variable, or a key-shaped endpoint label, before any request (MOCK: fetch spy)", async () => {
+    const hexKey = "0123456789abcdef0123456789abcdef";
+    for (const endpoint of [`https://${TEST_KEY}.cognitiveservices.azure.com`, `https://${hexKey}.cognitiveservices.azure.com`]) {
+      const fake = createFakeAzure({});
+      const { result, lines, outputDirectory } = await runMockedCheck({
+        environment: { AZURE_SPEECH_KEY: TEST_KEY, AZURE_SPEECH_ENDPOINT: endpoint, VOICE_PROVIDER: "azure" },
+        fake,
+      });
+      const output = lines.join("\n");
+      expect(result.exitCode).toBe(2);
+      expect(fake.calls).toEqual([]);
+      expect(output).toContain("AZURE_SPEECH_ENDPOINT holds a value shaped like a subscription key");
+      expect(output).not.toContain(TEST_KEY);
+      expect(output).not.toContain(hexKey);
       expect(await readdir(outputDirectory)).toEqual([]);
     }
   });

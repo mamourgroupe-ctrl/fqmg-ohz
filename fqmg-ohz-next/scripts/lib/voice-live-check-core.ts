@@ -457,6 +457,60 @@ export interface LiveCheckSummary {
   };
 }
 
+/** True when a region or endpoint value contains the key, or has a label shaped like a subscription key. */
+export function looksLikeKeyMisplacement(value: string, keyValue: string): boolean {
+  if (!value) return false;
+  if (keyValue && value.includes(keyValue)) return true;
+  return value.split(/[^A-Za-z0-9]+/).some((part) => KEY_SHAPED_PATTERN.test(part));
+}
+
+/** Describes what a live run would send. Pure: no network and no files. Header names are shown, never values. */
+export function buildLivePlanLines(endpoint: AzureEndpoint, synthesisText: string = LIVE_CHECK_SYNTHESIS_TEXT): string[] {
+  const routes = getAzureRoutes(endpoint.kind);
+  const origin = endpoint.origin;
+  const tokenUrl = deriveTokenIssuanceUrl(endpoint) ?? "(token host could not be derived)";
+  const isCustom = endpoint.kind === "resource";
+  const probeCount = isCustom ? 3 : 2; // Bearer and key on the adapter path, plus the key on the alternate path.
+  const tokenStepRequests = isCustom ? 6 : 5; // Token 1, voice list 2, probes (probeCount).
+  const totalRequests = 1 + tokenStepRequests + 1; // Inventory, auth check, synthesis.
+  const sentenceCharacters = [...synthesisText].length;
+  const probeCharacters = [...LIVE_CHECK_PROBE_TEXT].length;
+  const synthesisUrl = `${origin}${routes.synthesis}`;
+  const lines = [
+    `Endpoint: ${isCustom ? "custom subdomain" : "regional"}, origin ${origin}`,
+    `Step 1, inventory: GET ${origin}${routes.voicesList} with header Ocp-Apim-Subscription-Key. 1 request.`,
+    `Step 2, auth check: POST ${tokenUrl} with header Ocp-Apim-Subscription-Key, to obtain a token.`,
+    `  Then GET ${origin}${routes.voicesList} with header Authorization: Bearer, and again with Ocp-Apim-Subscription-Key.`,
+    `  Then POST ${synthesisUrl} with one Arabic word (${probeCharacters} characters), with header Authorization: Bearer, and again with Ocp-Apim-Subscription-Key.`,
+  ];
+  if (routes.alternateSynthesis) {
+    lines.push(`  Then POST ${origin}${routes.alternateSynthesis} with the same word and header Ocp-Apim-Subscription-Key (tests the documented path conflict).`);
+  }
+  lines.push(
+    "  Bearer requests run only if the token request succeeded.",
+    `  Step 2 sends at most ${tokenStepRequests} requests.`,
+    `Step 3, synthesis: POST ${synthesisUrl} with one Arabic sentence (${sentenceCharacters} characters) and header Ocp-Apim-Subscription-Key. It uses an ar-DZ voice if the inventory returns one; otherwise another Arabic voice, labeled NOT ALGERIAN. 1 request.`,
+    "Step 4, verify: ffprobe on the saved MP3, on the machine that runs the check. No network.",
+    `Total: at most ${totalRequests} requests. Text sent for synthesis: at most ${probeCount * probeCharacters + sentenceCharacters} characters (${probeCount} probe words plus the sentence). SSML markup and billing rules are not counted here.`,
+    `Outputs, under the package folder only: voice-live-output/${SUMMARY_FILE_NAME}, voice-live-output/${INVENTORY_FILE_NAME}, and voice-live-output/azure-speech-<voiceId>.mp3. The folder is git-ignored.`,
+    "Exit codes for a live run: 0 passed, 1 a step failed, 2 configuration problem (no request made).",
+  );
+  return lines;
+}
+
+export type LiveCheckArguments = { ok: true; plan: boolean } | { ok: false; message: string };
+
+/** Only --plan is accepted. Any other argument fails closed, so a typo cannot start a live run. The argument is never echoed. */
+export function parseVoiceLiveCheckArgs(argv: readonly string[]): LiveCheckArguments {
+  if (argv.some((argument) => argument !== "--plan")) {
+    return {
+      ok: false,
+      message: "ERROR: unsupported argument. The only supported argument is --plan, which prints the plan and makes no request. No provider request was made.",
+    };
+  }
+  return { ok: true, plan: argv.length > 0 };
+}
+
 export interface VoiceLiveCheckOptions {
   environment: VoiceProviderEnvironment;
   outputDirectory: string;
@@ -464,6 +518,8 @@ export interface VoiceLiveCheckOptions {
   probeAudio?: (filePath: string) => Promise<AudioProbeReport>;
   log?: (line: string) => void;
   now?: () => Date;
+  /** Plan mode: prints what a live run would send, after configuration checks. No request and no file. */
+  plan?: boolean;
 }
 
 export interface VoiceLiveCheckResult {
@@ -683,12 +739,18 @@ export async function runVoiceLiveCheck(options: VoiceLiveCheckOptions): Promise
     return { exitCode: 2 };
   }
 
-  // The adapter's region pattern also accepts a 32-character hex key. A key in the region variable would be
-  // sent in a hostname (and to DNS), so refuse before any request. The message never repeats the value.
+  // The adapter's region pattern accepts a 32-character hex value, and the endpoint host label is not checked
+  // for key-shaped content. A key in either variable would be sent in a hostname (and to DNS), so both are
+  // refused before any request. The messages never repeat the value.
   const regionValue = environment.AZURE_SPEECH_REGION?.trim() ?? "";
+  const endpointValue = environment.AZURE_SPEECH_ENDPOINT?.trim() ?? "";
   const keyValue = environment.AZURE_SPEECH_KEY?.trim() ?? "";
-  if (regionValue && (regionValue === keyValue || KEY_SHAPED_PATTERN.test(regionValue))) {
+  if (looksLikeKeyMisplacement(regionValue, keyValue)) {
     log("ERROR: AZURE_SPEECH_REGION holds a value shaped like a subscription key, not a region name. Put the region (for example eastus) in AZURE_SPEECH_REGION and the key only in AZURE_SPEECH_KEY. No provider request was made.");
+    return { exitCode: 2 };
+  }
+  if (looksLikeKeyMisplacement(endpointValue, keyValue)) {
+    log("ERROR: AZURE_SPEECH_ENDPOINT holds a value shaped like a subscription key. Put the key only in AZURE_SPEECH_KEY, and use the resource endpoint URL with no key in it. No provider request was made.");
     return { exitCode: 2 };
   }
 
@@ -697,6 +759,12 @@ export async function runVoiceLiveCheck(options: VoiceLiveCheckOptions): Promise
   if (!adapter.isConfigured() || !endpoint) {
     log("ERROR: AZURE_SPEECH_REGION or AZURE_SPEECH_ENDPOINT has an invalid format. Use a region such as eastus, or an https endpoint on cognitiveservices.azure.com or tts.speech.microsoft.com with no path. No provider request was made.");
     return { exitCode: 2 };
+  }
+
+  if (options.plan) {
+    for (const line of buildLivePlanLines(endpoint)) log(line);
+    log("PLAN ONLY: this mode makes no network request and writes no file. To send the requests listed above, run npm run voice:live-check with no flags.");
+    return { exitCode: 0 };
   }
 
   await mkdir(outputDirectory, { recursive: true });

@@ -71,7 +71,7 @@ jobs:
         env:
           AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
         run: |
-          # Prints file names and counts only. Never prints a matched value.
+          # Prints a description and a file count only. Never prints a matched value.
           OUTPUT_DIR="voice-live-output"
           leaks=0
           if [ ! -d "$OUTPUT_DIR" ]; then
