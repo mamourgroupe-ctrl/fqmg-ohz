@@ -1,13 +1,17 @@
 # Manual live voice check (Phase 2). Calls the real Azure Speech API once per step with the
 # credentials stored in GitHub Secrets, then uploads the audio and JSON summary as an artifact.
 #
-# PLACEMENT: GitHub runs only workflows stored in the repository-root .github/workflows/
-# directory. This copy lives in fqmg-ohz-next/.github/workflows/ and is therefore INERT.
-# To run it, move it to <repository-root>/.github/workflows/voice-live-check.yml. The steps use
-# working-directory: fqmg-ohz-next, which matches that root location.
+# PLACEMENT: GitHub runs only the copy stored in the repository-root .github/workflows/ directory.
+# A byte-identical mirror is kept at fqmg-ohz-next/.github/workflows/; keep the two files identical.
+# GitHub lists this workflow, and offers the Run workflow button, only once the file exists on the
+# default branch (main).
 #
-# TRIGGER: workflow_dispatch only (manual). It is not triggered by pushes or pull requests,
-# and it has not been run. Running it makes real, billable provider requests.
+# CODE SOURCE: the checkout step pins the branch arena/ede0565d-fqmg-ohz, where the project code
+# lives until PR #1 is merged. After PR #1 is merged and that branch is deleted, change the ref to
+# main. The steps use working-directory: fqmg-ohz-next.
+#
+# TRIGGER: workflow_dispatch only (manual). It is not triggered by pushes or pull requests.
+# Running it makes real, billable provider requests.
 #
 # SECRETS (names only; create them in GitHub > Settings > Secrets and variables > Actions):
 #   AZURE_SPEECH_KEY (required), and AZURE_SPEECH_REGION or AZURE_SPEECH_ENDPOINT.
@@ -44,6 +48,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          ref: arena/ede0565d-fqmg-ohz
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
