@@ -15,7 +15,8 @@
     "test": "vitest run",
     "studio": "remotion studio src/remotion/entry.tsx",
     "bundle:remotion": "remotion bundle src/remotion/entry.tsx",
-    "render:preview": "remotion render src/remotion/entry.tsx FQMG-OHZ-NEXT-Preview renders/phase-one-preview.mp4"
+    "render:preview": "remotion render src/remotion/entry.tsx FQMG-OHZ-NEXT-Preview renders/phase-one-preview.mp4",
+    "voice:live-check": "tsx scripts/voice-live-check.ts"
   },
   "dependencies": {
     "@remotion/renderer": "4.0.534",
@@ -33,6 +34,7 @@
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
     "eslint": "10.12.0",
+    "tsx": "4.23.15",
     "typescript": "5.9.3",
     "typescript-eslint": "8.71.1",
     "vite": "7.3.7",

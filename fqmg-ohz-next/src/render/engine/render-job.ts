@@ -68,7 +68,7 @@ function parseFrameRate(value: string | undefined): number {
   return denominator > 0 ? numerator / denominator : 0;
 }
 
-function getFfprobeExecutable(): string {
+export function getFfprobeExecutable(): string {
   try {
     const bundled = RenderInternals.getExecutablePath({
       type: "ffprobe",

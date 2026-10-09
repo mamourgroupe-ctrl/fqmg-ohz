@@ -33,12 +33,12 @@ const AzureVoiceRecordSchema = z.object({
 }).passthrough();
 const AzureVoiceListSchema = z.array(AzureVoiceRecordSchema).max(10_000);
 
-interface AzureEndpoint {
+export interface AzureEndpoint {
   origin: string;
   kind: "resource" | "regional";
 }
 
-function getAzureEndpoint(environment: VoiceProviderEnvironment): AzureEndpoint | null {
+export function getAzureEndpoint(environment: VoiceProviderEnvironment): AzureEndpoint | null {
   const configuredEndpoint = environment.AZURE_SPEECH_ENDPOINT?.trim();
   if (configuredEndpoint) {
     try {
