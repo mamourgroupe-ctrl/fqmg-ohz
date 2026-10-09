@@ -18,6 +18,9 @@ import {
 
 const OPENAI_PROVIDER_ID = "openai" as const;
 const DEFAULT_MODEL_ID = "gpt-4o-mini-tts";
+const DATED_TTS_MODEL_ID = "gpt-4o-mini-tts-2025-12-15";
+const MINI_TTS_MODELS = new Set([DEFAULT_MODEL_ID, DATED_TTS_MODEL_ID]);
+const MAX_OPENAI_TTS_INPUT_CHARACTERS = 4096;
 const FULL_VOICE_SET = [
   "alloy",
   "ash",
@@ -58,7 +61,7 @@ function getModelId(environment: VoiceProviderEnvironment): string {
 }
 
 function getVoiceIds(modelId: string): readonly string[] {
-  if (modelId === DEFAULT_MODEL_ID) return FULL_VOICE_SET;
+  if (MINI_TTS_MODELS.has(modelId)) return FULL_VOICE_SET;
   if (SMALL_VOICE_MODELS.has(modelId)) return STANDARD_MODEL_VOICES;
   return [];
 }
@@ -88,7 +91,10 @@ function getOpenAIBaseUrl(environment: VoiceProviderEnvironment): string | null 
 export class OpenAITtsAdapter implements VoiceProviderAdapter {
   readonly id = OPENAI_PROVIDER_ID;
   readonly requiredEnvironment = ["OPENAI_API_KEY"] as const;
-  readonly supportsFreeformStyle = true;
+
+  get supportsFreeformStyle(): boolean {
+    return MINI_TTS_MODELS.has(getModelId(this.environment));
+  }
 
   constructor(
     private readonly environment: VoiceProviderEnvironment = process.env,
@@ -134,6 +140,12 @@ export class OpenAITtsAdapter implements VoiceProviderAdapter {
     const voiceIds = getVoiceIds(modelId);
     if (voice.modelId !== modelId || !voiceIds.includes(voice.voiceId)) {
       throw new VoiceProviderError(this.id, "not-found");
+    }
+    if ([...request.text].length > MAX_OPENAI_TTS_INPUT_CHARACTERS) {
+      throw new VoiceProviderError(this.id, "invalid-request");
+    }
+    if (request.voiceStyle && !MINI_TTS_MODELS.has(modelId)) {
+      throw new VoiceProviderError(this.id, "invalid-request");
     }
 
     const apiKey = this.environment.OPENAI_API_KEY?.trim();

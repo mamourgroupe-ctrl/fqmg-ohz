@@ -18,6 +18,7 @@
     "render:preview": "remotion render src/remotion/entry.tsx FQMG-OHZ-NEXT-Preview renders/phase-one-preview.mp4"
   },
   "dependencies": {
+    "@remotion/renderer": "4.0.534",
     "google-auth-library": "11.2.0",
     "next": "16.4.0",
     "react": "19.2.1",

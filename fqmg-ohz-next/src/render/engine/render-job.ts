@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
+import { RenderInternals } from "@remotion/renderer";
 import path from "node:path";
 import { z } from "zod";
 
@@ -66,6 +68,21 @@ function parseFrameRate(value: string | undefined): number {
   return denominator > 0 ? numerator / denominator : 0;
 }
 
+function getFfprobeExecutable(): string {
+  try {
+    const bundled = RenderInternals.getExecutablePath({
+      type: "ffprobe",
+      indent: false,
+      logLevel: "error",
+      binariesDirectory: null,
+    });
+    if (existsSync(bundled)) return bundled;
+  } catch {
+    // Fall back to a system ffprobe for platforms without a Remotion binary package.
+  }
+  return "ffprobe";
+}
+
 function inspectVideoWithFfprobe(filePath: string): Promise<{
   formatName: string;
   durationSeconds: number;
@@ -75,7 +92,7 @@ function inspectVideoWithFfprobe(filePath: string): Promise<{
 }> {
   return new Promise((resolve, reject) => {
     execFile(
-      "ffprobe",
+      getFfprobeExecutable(),
       [
         "-v", "error",
         "-show_entries", "format=format_name,duration:stream=codec_type,width,height,avg_frame_rate",

@@ -87,7 +87,11 @@ export class ElevenLabsAdapter implements VoiceProviderAdapter {
       pages.push(...parsed.data.voices);
 
       const nextToken = parsed.data.next_page_token ?? undefined;
-      if (!nextToken || !parsed.data.has_more || seenPageTokens.has(nextToken)) break;
+      const hasMore = parsed.data.has_more ?? Boolean(nextToken);
+      if (!hasMore) break;
+      if (!nextToken || seenPageTokens.has(nextToken) || pageNumber === MAX_VOICE_PAGES - 1) {
+        throw new VoiceProviderError(this.id, "invalid-response");
+      }
       seenPageTokens.add(nextToken);
       pageToken = nextToken;
     }
@@ -162,7 +166,6 @@ export class ElevenLabsAdapter implements VoiceProviderAdapter {
       body: JSON.stringify({
         text: request.text,
         model_id: modelId,
-        language_code: request.languageTag,
         voice_settings: { speed: request.speakingRate },
       }),
       signal,

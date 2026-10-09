@@ -89,6 +89,22 @@ describe("ElevenLabs adapter", () => {
     );
   });
 
+  it("fails inventory discovery instead of silently using an incomplete capped page set", async () => {
+    const pages = Array.from({ length: 10 }, (_, page) => jsonResponse({
+      voices: [{ voice_id: `voice-${page}`, name: `Voice ${page}`, verified_languages: [] }],
+      has_more: true,
+      next_page_token: `page-${page + 1}`,
+    }));
+    const fetcher = mockFetchResponses(pages);
+    const adapter = new ElevenLabsAdapter({ ELEVENLABS_API_KEY: "fixture-key" }, fetcher);
+
+    await expect(adapter.listVoices("ar-DZ", noSignal)).rejects.toMatchObject({
+      code: "invalid-response",
+      retryable: false,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(10);
+  });
+
   it("synthesizes a selected voice into validated MP3 audio", async () => {
     const fetcher = mockFetchResponses([
       jsonResponse({
@@ -109,12 +125,13 @@ describe("ElevenLabs adapter", () => {
     const [url, options] = vi.mocked(fetcher).mock.calls[1] as unknown as [string, RequestInit];
     expect(url).toContain("https://api.elevenlabs.io/v1/text-to-speech/fixture-voice");
     expect(url).toContain("output_format=mp3_44100_128");
-    expect(JSON.parse(String(options.body))).toMatchObject({
+    const body = JSON.parse(String(options.body)) as Record<string, unknown>;
+    expect(body).toMatchObject({
       text: "Bonjour.",
       model_id: "eleven_multilingual_v2",
-      language_code: "fr-FR",
       voice_settings: { speed: 1 },
     });
+    expect(body).not.toHaveProperty("language_code");
   });
 
   it("does not retry authentication failures", async () => {
@@ -182,6 +199,29 @@ describe("Google Cloud TTS adapter", () => {
       voice: { languageCode: "en-US", name: "en-US-Test-Standard-A" },
       audioConfig: { audioEncoding: "MP3", speakingRate: 1 },
     });
+  });
+
+  it("rejects content above Google's 5000-byte request limit before obtaining credentials", async () => {
+    const fetcher = mockFetch(new Response(""));
+    const accessTokenProvider = vi.fn(async () => "fixture-token");
+    const adapter = new GoogleCloudTtsAdapter(
+      { GOOGLE_CLOUD_PROJECT: "fixture-project" },
+      fetcher,
+      accessTokenProvider,
+    );
+    const request = VoiceSynthesisRequestSchema.parse({
+      projectId: "google-test",
+      text: "a".repeat(5001),
+      languageTag: "en-US",
+      provider: "google-cloud",
+    });
+
+    await expect(adapter.synthesize(request, googleVoice, noSignal)).rejects.toMatchObject({
+      code: "invalid-request",
+      retryable: false,
+    });
+    expect(accessTokenProvider).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("maps authentication errors safely and bounds credential acquisition by the request signal", async () => {

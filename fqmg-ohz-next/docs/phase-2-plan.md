@@ -69,23 +69,24 @@ Only `fqmg-ohz-next/.env.example` is updated for environment configuration; it c
 
 ## 5. MP4 prerequisite investigation and observed outcome
 
-- `npm run render:preview` uses Remotion 4. Remotion attempted to fetch its Chrome Headless Shell because no compatible browser was on `PATH` or in its cache. The fetch failed with `ECONNRESET` while contacting `remotion.media` in this environment; no Chrome executable was cached and no MP4 was written.
-- The checked environment had no `ffmpeg`, `ffprobe`, Chromium, Chromium Browser, or Google Chrome command on `PATH`.
-- The installed Remotion Linux x64 compositor package does include bundled FFmpeg and FFprobe 7.1 executables, and both were separately invoked successfully with `-version`. However, the existing `verifyRenderOutput` deliberately invokes the command `ffprobe` from `PATH`; a system/PATH FFprobe or a deliberate validator integration is still required for the current completion gate.
-- **Observed render result:** blocked before frame rendering by the Chrome Headless Shell download failure; the expected output file does not exist. No render is marked successful.
-- If the browser prerequisite is supplied, Remotion's bundled media binaries can support its render pipeline. A final MP4 still must exist and pass the app's independent FFprobe validation. Audio-bearing projects remain rejected before Remotion render until actual mixing is implemented and tested.
+- `npm run render:preview` attempted to fetch Remotion's Chrome Headless Shell because no compatible browser was installed or cached. The download failed with `ECONNRESET` while contacting `remotion.media`; no Remotion composition render was produced.
+- This environment has no system `ffmpeg`, `ffprobe`, Chromium, Chromium Browser, or Google Chrome command on `PATH`. Remotion's Linux x64 compositor package does include bundled FFmpeg and FFprobe 7.1.
+- `verifyRenderOutput` now resolves Remotion's bundled FFprobe first, then falls back to `ffprobe` on `PATH`. Its success gate still requires a real MP4/WebM file plus a valid ffprobe video stream, dimensions, frame rate, and duration.
+- A one-second synthetic black H.264 MP4 was generated with the bundled FFmpeg and validated with the bundled FFprobe: 1,846 bytes, 160×90, 24 fps, 1.0 second. This validates the media binaries and completion gate only; it is **not** a Remotion project render.
+- **Actual project-render result:** blocked on the missing Chrome Headless Shell. No project render is marked successful. Audio-bearing projects remain fail-closed until actual audio mixing is implemented and tested.
+- See [`docs/PHASE2_VERIFICATION.md`](PHASE2_VERIFICATION.md) for the detailed integration findings, official-provider documentation cross-check, and user actions.
 
 ## 6. Verification record
 
 Fixture/unit coverage includes request/contract validation, all four isolated provider adapters, malformed/provider failure handling, locale/dialect evidence and AUTO failure/fallback, pin persistence/concurrency/conflicts, cache identity/TTL/size/concurrency/tamper cases, safe audio references, API envelope/body limits, project-model attachment, preview compatibility, and fail-closed render validation.
 
-- `npm test`: **passed — 78 tests across 14 files**.
+- `npm test`: **passed — 84 tests across 14 files**.
 - `npm run typecheck`: **passed**.
 - `npm run lint`: **passed**.
-- `npm run build`: **passed**; Next lists the planner and all three dynamic voice API routes.
-- Live provider/authenticated inventory result: **not tested**; adapter tests use fixtures.
-- Verified Algerian voice result: **none verified**; strict AUTO remains fail-closed absent evidence.
-- MP4 render result: **blocked** at the Chrome Headless Shell download; no validated output file was produced.
+- `npm run build`: **passed**; Next lists the planner and all voice API routes.
+- Live provider/authenticated inventory result: **not tested**; no configured credentials were found and adapter tests use fixtures.
+- Verified Algerian voice result: **none verified for this application**; strict AUTO remains fail-closed absent evidence. This is not a claim that providers globally lack Algerian Arabic.
+- Synthetic MP4 smoke test: **passed and ffprobe-validated**. Remotion composition render: **not rendered**, blocked on Chrome Headless Shell.
 
 ## 7. Acceptance/stop line
 

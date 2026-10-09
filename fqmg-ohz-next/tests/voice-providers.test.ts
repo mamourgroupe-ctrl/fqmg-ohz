@@ -157,6 +157,55 @@ describe("OpenAI TTS adapter", () => {
     });
   });
 
+  it("rejects unsupported instructions for legacy models before calling OpenAI", async () => {
+    const fetcher = mockFetch(new Response(mp3Bytes, { headers: { "Content-Type": "audio/mpeg" } }));
+    const adapter = new OpenAITtsAdapter({ OPENAI_API_KEY: "fixture-key", OPENAI_TTS_MODEL: "tts-1" }, fetcher);
+    const [voice] = await adapter.listVoices("en-US", noSignal);
+    const request = VoiceSynthesisRequestSchema.parse({
+      projectId: "provider-test",
+      text: "Hello there.",
+      languageTag: "en-US",
+      provider: "openai",
+      voiceId: voice.voiceId,
+      voiceStyle: "calm narration",
+    });
+
+    expect(adapter.supportsFreeformStyle).toBe(false);
+    await expect(adapter.synthesize(request, voice, noSignal)).rejects.toMatchObject({
+      code: "invalid-request",
+      retryable: false,
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("rejects input above OpenAI's documented 4096-character limit before calling the API", async () => {
+    const fetcher = mockFetch(new Response(mp3Bytes, { headers: { "Content-Type": "audio/mpeg" } }));
+    const adapter = new OpenAITtsAdapter({ OPENAI_API_KEY: "fixture-key" }, fetcher);
+    const [voice] = await adapter.listVoices("en-US", noSignal);
+    const request = VoiceSynthesisRequestSchema.parse({
+      projectId: "provider-test",
+      text: "a".repeat(4097),
+      languageTag: "en-US",
+      provider: "openai",
+      voiceId: voice.voiceId,
+    });
+
+    await expect(adapter.synthesize(request, voice, noSignal)).rejects.toMatchObject({
+      code: "invalid-request",
+      retryable: false,
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("supports the documented dated mini TTS model alias", async () => {
+    const adapter = new OpenAITtsAdapter({
+      OPENAI_API_KEY: "fixture-key",
+      OPENAI_TTS_MODEL: "gpt-4o-mini-tts-2025-12-15",
+    }, mockFetch(new Response("")));
+    expect(adapter.supportsFreeformStyle).toBe(true);
+    expect(await adapter.listVoices("en-US", noSignal)).toHaveLength(13);
+  });
+
   it("rejects insecure/custom base URLs before issuing a request", () => {
     const adapter = new OpenAITtsAdapter({
       OPENAI_API_KEY: "fixture-key",

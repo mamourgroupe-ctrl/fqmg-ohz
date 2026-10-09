@@ -1,10 +1,30 @@
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { RenderInternals } from "@remotion/renderer";
 import { afterEach, describe, expect, it } from "vitest";
 import { completeRenderJobWithOutput, RenderJobSchema, verifyRenderOutput } from "@/render/engine/render-job";
 
 let temporaryDirectory = "";
+
+function getRemotionBinary(type: "ffmpeg" | "ffprobe"): string | undefined {
+  try {
+    const executable = RenderInternals.getExecutablePath({
+      type,
+      indent: false,
+      logLevel: "error",
+      binariesDirectory: null,
+    });
+    return existsSync(executable) ? executable : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const bundledFfmpeg = getRemotionBinary("ffmpeg");
+const bundledFfprobe = getRemotionBinary("ffprobe");
 
 afterEach(async () => {
   if (temporaryDirectory) {
@@ -41,6 +61,40 @@ describe("render job integrity", () => {
       engine: "remotion",
       createdAt: "2026-10-08T00:00:00.000Z",
     }, filePath)).rejects.toThrow();
+  });
+
+  it.skipIf(!bundledFfmpeg || !bundledFfprobe)("validates a real synthetic MP4 using Remotion's bundled ffmpeg and ffprobe", async () => {
+    temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "fqmg-render-smoke-"));
+    const width = 160;
+    const height = 90;
+    const fps = 24;
+    const frameCount = 24;
+    const outputPath = path.join(temporaryDirectory, "smoke.mp4");
+
+    execFileSync(bundledFfmpeg!, [
+      "-hide_banner", "-loglevel", "error",
+      "-f", "lavfi",
+      "-i", `nullsrc=s=${width}x${height}:r=${fps}`,
+      "-frames:v", String(frameCount),
+      "-c:v", "libx264",
+      "-preset", "ultrafast",
+      "-pix_fmt", "yuv420p",
+      "-movflags", "+faststart",
+      "-y", outputPath,
+    ], { timeout: 30_000 });
+
+    const verified = await verifyRenderOutput(outputPath);
+    const completed = await completeRenderJobWithOutput({
+      id: "render-smoke",
+      projectId: "project-smoke",
+      engine: "remotion",
+      createdAt: "2026-10-09T00:00:00.000Z",
+    }, outputPath);
+
+    expect(verified).toMatchObject({ format: "mp4", width, height, fps });
+    expect(verified.durationSeconds).toBeCloseTo(1, 1);
+    expect(verified.sizeBytes).toBeGreaterThan(100);
+    expect(completed).toMatchObject({ status: "succeeded", progress: 100 });
   });
 
   it("rejects an output path without an MP4/WebM extension", async () => {

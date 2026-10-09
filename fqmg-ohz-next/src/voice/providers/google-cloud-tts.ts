@@ -23,6 +23,7 @@ import {
 const PROVIDER_ID = "google-cloud" as const;
 const MODEL_ID = "google-cloud-tts-v1";
 const GOOGLE_CLOUD_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
+const MAX_GOOGLE_TTS_INPUT_BYTES = 5_000;
 
 const GoogleVoiceSchema = z.object({
   name: z.string().min(1).max(256),
@@ -162,6 +163,9 @@ export class GoogleCloudTtsAdapter implements VoiceProviderAdapter {
     ensureProviderConfigured(this.id, this.isConfigured());
     if (voice.providerId !== this.id) throw new VoiceProviderError(this.id, "not-found");
     if (request.voiceStyle) throw new VoiceProviderError(this.id, "invalid-request");
+    if (Buffer.byteLength(request.text, "utf8") > MAX_GOOGLE_TTS_INPUT_BYTES) {
+      throw new VoiceProviderError(this.id, "invalid-request");
+    }
     const accessToken = await this.getAccessToken(signal);
 
     const response = await fetchProviderResponse(this.id, this.fetcher, "https://texttospeech.googleapis.com/v1/text:synthesize", {
