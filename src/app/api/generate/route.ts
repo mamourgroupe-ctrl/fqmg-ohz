@@ -98,6 +98,22 @@ import { useState, useEffect } from "react";
 NEVER use these as variable names - they shadow imports:
 - spring, interpolate, useCurrentFrame, useVideoConfig, AbsoluteFill, Sequence
 
+
+## ARABIC TEXT SUPPORT (CRITICAL)
+
+When the prompt contains Arabic text or requires Arabic labels:
+1. ALWAYS use fontFamily: "Cairo, sans-serif" for Arabic text
+2. Add direction: "rtl" and textAlign: "center" to the container
+3. Use fontSize slightly larger than Latin (Arabic needs more space)
+4. Add lineHeight: 1.4 or higher for readability
+5. Do NOT mix Arabic and Latin fonts in the same element
+
+Example:
+<div style={{ fontFamily: "Cairo, sans-serif", direction: "rtl", textAlign: "center", fontSize: 48, lineHeight: 1.4 }}>
+  خزانات مياه بجودة عالية
+</div>
+
+Available Arabic fonts: Cairo (primary), Tajawal (alternative).
 ## STYLING RULES
 
 - Use inline styles only

@@ -23,7 +23,12 @@ import {
   useVideoConfig,
 } from "remotion";
 import * as THREE from "three";
+import { loadFont as loadCairo } from "@remotion/google-fonts/Cairo";
+import { loadFont as loadTajawal } from "@remotion/google-fonts/Tajawal";
 
+// ─── Preload Arabic Fonts (available at render time) ───
+loadCairo(); // preload Cairo
+loadTajawal(); // preload Tajawal
 export interface CompilationResult {
   Component: React.ComponentType | null;
   error: string | null;
