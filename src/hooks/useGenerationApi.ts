@@ -198,7 +198,8 @@ export function useGenerationApi(): UseGenerationApiReturn {
                 const codeToShow = stripMarkdownFences(accumulatedText);
                 onCodeGenerated?.(codeToShow);
               } else if (event.type === "error") {
-                throw new Error(event.error);
+                console.error("STREAM ERROR:", event.error);
+            throw new Error(event.error);
               }
             } catch (parseError) {
               if (
@@ -247,3 +248,5 @@ export function useGenerationApi(): UseGenerationApiReturn {
     runGeneration,
   };
 }
+
+

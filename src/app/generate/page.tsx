@@ -13,6 +13,7 @@ import { examples } from "../../examples/code";
 import { useAnimationState } from "../../hooks/useAnimationState";
 import { useAutoCorrection } from "../../hooks/useAutoCorrection";
 import { useConversationState } from "../../hooks/useConversationState";
+import type { AspectRatioId } from "../../types/generation";
 import type {
   AssistantMetadata,
   EditOperation,
@@ -34,6 +35,7 @@ function GeneratePageContent() {
     examples[0]?.durationInFrames || 150,
   );
   const [fps, setFps] = useState(examples[0]?.fps || 30);
+  const [aspectRatio, setAspectRatio] = useState<AspectRatioId>("9:16");
   const [currentFrame, setCurrentFrame] = useState(0);
   const [isStreaming, setIsStreaming] = useState(willAutoStart);
   const [streamPhase, setStreamPhase] = useState<StreamPhase>(
@@ -303,6 +305,8 @@ function GeneratePageContent() {
                 fps={fps}
                 onDurationChange={setDurationInFrames}
                 onFpsChange={setFps}
+                aspectRatio={aspectRatio}
+                onAspectRatioChange={setAspectRatio}
                 isCompiling={isCompiling}
                 isStreaming={isStreaming}
                 error={generationError?.message || codeError}

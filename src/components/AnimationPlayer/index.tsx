@@ -2,6 +2,7 @@
 
 import { Player, type ErrorFallback, type PlayerRef } from "@remotion/player";
 import React, { useEffect, useRef } from "react";
+import { ASPECT_RATIOS, type AspectRatioId } from "@/types/generation";
 import { ErrorDisplay, type ErrorType } from "../ErrorDisplay";
 import { RenderControls } from "./RenderControls";
 import { SettingsModal } from "./SettingsModal";
@@ -36,6 +37,8 @@ interface AnimationPlayerProps {
   code: string;
   onRuntimeError?: (error: string) => void;
   onFrameChange?: (frame: number) => void;
+  aspectRatio?: AspectRatioId;
+  onAspectRatioChange?: (id: AspectRatioId) => void;
 }
 
 export const AnimationPlayer: React.FC<AnimationPlayerProps> = ({
@@ -51,7 +54,10 @@ export const AnimationPlayer: React.FC<AnimationPlayerProps> = ({
   code,
   onRuntimeError,
   onFrameChange,
+  aspectRatio = "16:9",
+  onAspectRatioChange,
 }) => {
+  const { width: compWidth, height: compHeight } = ASPECT_RATIOS[aspectRatio];
   const playerRef = useRef<PlayerRef>(null);
 
   // Listen for runtime errors from the Player's error boundary
@@ -134,8 +140,8 @@ export const AnimationPlayer: React.FC<AnimationPlayerProps> = ({
             component={Component}
             durationInFrames={durationInFrames}
             fps={fps}
-            compositionHeight={1080}
-            compositionWidth={1920}
+            compositionHeight={compHeight}
+            compositionWidth={compWidth}
             style={{
               width: "100%",
               height: "100%",
@@ -161,6 +167,8 @@ export const AnimationPlayer: React.FC<AnimationPlayerProps> = ({
             onDurationChange={onDurationChange}
             fps={fps}
             onFpsChange={onFpsChange}
+            aspectRatio={aspectRatio}
+            onAspectRatioChange={onAspectRatioChange || (() => {})}
           />
         </div>
       </>
