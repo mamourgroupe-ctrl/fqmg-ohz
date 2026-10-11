@@ -6,7 +6,7 @@
  *   AI_PROVIDER=codecraft (default) | openrouter | openai | custom
  */
 
-export type AIProviderName = "codecraft" | "openrouter" | "openai" | "orcarouter" | "custom";
+export type AIProviderName = "codecraft" | "openrouter" | "openai" | "orcarouter" | "kie" | "anthropic" | "ollama" | "custom";
 
 export interface AIConfig {
   provider: AIProviderName;
@@ -63,6 +63,30 @@ const PROVIDER_CONFIGS: Record<
     ],
   }),
 
+  kie: (env) => ({
+    provider: "kie",
+    apiKey: env.KIE_API_KEY,
+    baseURL: env.KIE_BASE_URL || "https://api.kie.ai/claude/v1",
+    defaultModel: env.KIE_DEFAULT_MODEL || "claude-sonnet-5",
+    fallbackModels: ["claude-opus-5"],
+  }),
+  anthropic: (env) => ({
+    provider: "anthropic",
+    apiKey: env.ANTHROPIC_API_KEY,
+    baseURL: "https://api.anthropic.com/v1",
+    defaultModel: env.ANTHROPIC_DEFAULT_MODEL || "claude-sonnet-4-5-20250929",
+    fallbackModels: [
+      "claude-opus-4-5-20250918",
+      "claude-haiku-4-5-20251001",
+    ],
+  }),
+  ollama: (env) => ({
+    provider: "ollama",
+    apiKey: env.OLLAMA_API_KEY || "ollama",
+    baseURL: env.OLLAMA_BASE_URL || "http://localhost:11434/v1",
+    defaultModel: env.OLLAMA_DEFAULT_MODEL || "qwen2.5-coder:1.5b",
+    fallbackModels: ["qwen2.5-coder:7b", "qwen2.5-coder:14b", "llama3.2:3b"],
+  }),
   custom: (env) => ({
     provider: "custom",
     apiKey: env.CUSTOM_API_KEY,
@@ -101,6 +125,9 @@ export function getProviderDisplayName(): string {
     openrouter: "OpenRouter",
     openai: "OpenAI",
     orcarouter: "OrcaRouter",
+  anthropic: "Anthropic (Official)",
+  ollama: "Ollama (Local)",
+  kie: "KIE AI (Claude)",
     custom: "Custom",
   };
   return names[config.provider];

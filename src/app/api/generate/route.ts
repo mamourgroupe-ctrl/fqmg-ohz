@@ -4,8 +4,9 @@ import {
   SKILL_NAMES,
   type SkillName,
 } from "@/skills";
-import { createOpenAI } from "@ai-sdk/openai";
-import { getAIConfig } from "@/lib/ai-provider";
+
+
+import { selectWorkingModel } from "@/lib/model-router";
 import { generateObject, streamText } from "ai";
 import { z } from "zod";
 
@@ -114,6 +115,106 @@ Example:
 </div>
 
 Available Arabic fonts: Cairo (primary), Tajawal (alternative).
+
+## IMAGES AND ASSETS (CRITICAL)
+
+The following images are available in the public/assets/ folder:
+- /assets/logo-hp.jpeg          → HEMMAMI PLAST logo (blue circle with HP)
+- /assets/catalog-1.jpeg        → Product catalog page 1
+- /assets/catalog-2.jpeg        → Product catalog page 2
+- /assets/product-showcase.jpeg → Green water tanks product photo
+
+To use any image, you MUST use staticFile() + Img from remotion:
+
+<Img src={staticFile("/assets/logo-hp.jpeg")} style={{ width: 200, height: 200 }} />
+
+RULES:
+1. NEVER use <img> tag directly — ALWAYS use <Img> from remotion
+2. ALWAYS wrap the path in staticFile() — never hardcode paths
+3. Both Img and staticFile are pre-imported in the environment
+4. Use objectFit: "contain" to preserve aspect ratio
+5. For logos use transparent positioning; for photos use objectFit: "cover"
+
+
+## PROFESSIONAL MONTAGE RULES (CRITICAL — NOT SLIDESHOW)
+
+A montage is NOT a slideshow. Every image MUST have motion.
+
+### 1. CAMERA MOVEMENT ON EVERY IMAGE (Ken Burns Effect)
+NEVER display an image at fixed scale. ALWAYS animate it:
+- Zoom IN: scale goes from 1.0 → 1.15 (interpolate with extrapolate clamp)
+- Zoom OUT: scale goes from 1.15 → 1.0
+- Pan LEFT/RIGHT: translateX from -5% → +5%
+- Pan UP/DOWN: translateY from -5% → +5%
+- Combine Zoom + Pan for cinematic feel
+
+Example:
+<Img src={staticFile("/assets/catalog-1.jpeg")}
+  style={{
+    width: "100%", height: "100%", objectFit: "cover",
+    transform: "scale(" + interpolate(frame, [0, 60], [1.0, 1.15], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) + ") translateX(" + interpolate(frame, [0, 60], [-3, 3]) + "%)"
+  }}
+/>
+
+### 2. SCENE TRANSITIONS (MANDATORY)
+NEVER use hard cuts. Use TransitionSeries with:
+- fade() — for elegant/emotional moments
+- slide({ direction: "from-right" }) — for product reveals
+- wipe() — for technical/industrial content
+- clockWipe() — for impact/energetic moments
+Each transition: 15-25 frames, overlap between scenes.
+
+### 3. TEXT ANIMATION (NEVER STATIC)
+Every text element MUST animate:
+- Typewriter: reveal character by character
+- Slide-in from side + fade (spring timing)
+- Scale bounce: spring({ frame, fps, config: { damping: 12 } })
+- Staggered word-by-word with 3-5 frame delays
+
+### 4. LAYERED COMPOSITION
+Each scene MUST have 3+ layers:
+- Background: gradient / solid / blurred image
+- Midground: main image with Ken Burns + optional color overlay
+- Foreground: text, logo, shapes with animated entrances
+
+### 5. COLOR GRADING OVERLAYS
+Add brand-colored semi-transparent overlays on images:
+- Blue overlay: rgba(43, 123, 196, 0.4) — for brand consistency
+- Green accent: rgba(140, 198, 63, 0.5) — for highlights
+- Dark vignette: radial-gradient for focus
+
+### 6. ELEMENT STAGGERING
+Multiple elements in a scene MUST enter with staggered delays:
+const delay = index * 8; // frames
+
+### 7. BEAT-SYNCED TIMING
+Scene durations must be multiples of 15 frames (0.5s at 30fps):
+3.0s, 2.5s, 2.0s, 3.5s, etc. — never arbitrary numbers.
+
+
+## TRANSITIONS — CRITICAL SYNTAX RULES
+
+When using TransitionSeries, timing MUST be a FUNCTION, never a plain object.
+
+❌ WRONG:
+<TransitionSeries.Transition presentation={fade()} timing={{ durationInFrames: 15 }} />
+
+✅ CORRECT:
+<TransitionSeries.Transition presentation={fade()} timing={linearTiming({ durationInFrames: 15 })} />
+
+For spring-based:
+<TransitionSeries.Transition presentation={fade()} timing={springTiming({ config: { damping: 200 }, durationInFrames: 20 })} />
+
+Available timing functions (all pre-imported):
+- linearTiming({ durationInFrames: N })
+- springTiming({ durationInFrames: N, config: { damping: 200 } })
+
+RULES:
+1. timing prop ALWAYS takes a function call (linearTiming(...) or springTiming(...))
+2. NEVER pass a plain object like { durationInFrames: 15 }
+3. Total of all Transition durations + all Sequence durations = video durationInFrames
+4. Transition duration should be 10-30 frames typically
+
 ## STYLING RULES
 
 - Use inline styles only
@@ -169,14 +270,9 @@ When returning full replacement code (type: "full"):
 - NEVER nest the export keyword inside another function or arrow function body
 `;
 
-// Schema for follow-up edit responses
-// Note: Using a flat object schema because OpenAI doesn't support discriminated unions
-const FollowUpResponseSchema = z.object({
-  type: z
-    .enum(["edit", "full"])
-    .describe(
-      'Use "edit" for small targeted changes, "full" for major restructuring',
-    ),
+// Schema for follow-up edit responses using discriminated union
+const EditResponseSchema = z.object({
+  type: z.literal("edit"),
   summary: z
     .string()
     .describe(
@@ -196,17 +292,30 @@ const FollowUpResponseSchema = z.object({
         new_string: z.string().describe("The replacement string"),
       }),
     )
-    .optional()
+    .min(1, "At least one edit is required when type is 'edit'"),
+  code: z.undefined(),
+});
+
+const FullResponseSchema = z.object({
+  type: z.literal("full"),
+  summary: z
+    .string()
     .describe(
-      "Required when type is 'edit': array of search-replace operations",
+      "A brief 1-sentence summary of what changes were made, e.g. 'Rewrote animation with new style'",
     ),
   code: z
     .string()
-    .optional()
+    .min(1, "Full replacement code is required when type is 'full'")
     .describe(
-      "Required when type is 'full': the complete replacement code starting with imports",
+      "The complete replacement code starting with imports and ending with };",
     ),
+  edits: z.undefined(),
 });
+
+const FollowUpResponseSchema = z.discriminatedUnion("type", [
+  EditResponseSchema,
+  FullResponseSchema,
+]);
 
 type EditOperation = {
   description: string;
@@ -215,14 +324,35 @@ type EditOperation = {
   lineNumber?: number;
 };
 
+// Normalize line endings to LF for consistent matching
+function normalizeLineEndings(str: string): string {
+  return str.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
 // Calculate line number where a string occurs in code
 function getLineNumber(code: string, searchString: string): number {
-  const index = code.indexOf(searchString);
+  const normalizedCode = normalizeLineEndings(code);
+  const normalizedSearch = normalizeLineEndings(searchString);
+  const index = normalizedCode.indexOf(normalizedSearch);
   if (index === -1) return -1;
-  return code.substring(0, index).split("\n").length;
+  return normalizedCode.substring(0, index).split("\n").length;
+}
+
+// Find all occurrences of a string in code
+function findAllMatches(code: string, searchString: string): number[] {
+  const normalizedCode = normalizeLineEndings(code);
+  const normalizedSearch = normalizeLineEndings(searchString);
+  const matches: number[] = [];
+  let index = normalizedCode.indexOf(normalizedSearch);
+  while (index !== -1) {
+    matches.push(index);
+    index = normalizedCode.indexOf(normalizedSearch, index + 1);
+  }
+  return matches;
 }
 
 // Apply edit operations to code and enrich with line numbers
+// Validates all edits against original code first, then applies atomically
 function applyEdits(
   code: string,
   edits: EditOperation[],
@@ -233,50 +363,227 @@ function applyEdits(
   enrichedEdits?: EditOperation[];
   failedEdit?: EditOperation;
 } {
-  let result = code;
-  const enrichedEdits: EditOperation[] = [];
+  const normalizedCode = normalizeLineEndings(code);
+
+  // Phase 1: Validate all edits against the ORIGINAL code
+  // This prevents partial application and ensures all old_strings exist in the original
+  const validatedEdits: Array<EditOperation & { matchIndex: number }> = [];
 
   for (let i = 0; i < edits.length; i++) {
     const edit = edits[i];
-    const { old_string, new_string, description } = edit;
+    const { old_string, new_string } = edit;
+    const normalizedOldString = normalizeLineEndings(old_string);
 
-    // Check if the old_string exists
-    if (!result.includes(old_string)) {
+    // Check if the old_string exists in original code
+    if (!normalizedCode.includes(normalizedOldString)) {
       return {
         success: false,
         result: code,
-        error: `Edit ${i + 1} failed: Could not find the specified text`,
+        error: `Edit ${i + 1} failed: Could not find the specified text in the original code`,
         failedEdit: edit,
       };
     }
 
     // Check for multiple matches (ambiguous)
-    const matches = result.split(old_string).length - 1;
-    if (matches > 1) {
+    const matches = findAllMatches(code, old_string);
+    if (matches.length > 1) {
       return {
         success: false,
         result: code,
-        error: `Edit ${i + 1} failed: Found ${matches} matches. The edit target is ambiguous.`,
+        error: `Edit ${i + 1} failed: Found ${matches.length} matches in the original code. The edit target is ambiguous. Include more surrounding context to make it unique.`,
         failedEdit: edit,
       };
     }
 
-    // Get line number before applying edit
-    const lineNumber = getLineNumber(result, old_string);
+    // Store the match index for later application
+    validatedEdits.push({
+      ...edit,
+      old_string: normalizedOldString,
+      new_string: normalizeLineEndings(new_string),
+      matchIndex: matches[0],
+    });
+  }
+
+  // Phase 2: Check for overlapping edits
+  // Sort by match index to detect overlaps
+  const sortedEdits = [...validatedEdits].sort((a, b) => a.matchIndex - b.matchIndex);
+  for (let i = 0; i < sortedEdits.length - 1; i++) {
+    const current = sortedEdits[i];
+    const next = sortedEdits[i + 1];
+    const currentEnd = current.matchIndex + current.old_string.length;
+    if (currentEnd > next.matchIndex) {
+      return {
+        success: false,
+        result: code,
+        error: `Edit ${validatedEdits.indexOf(current) + 1} and edit ${validatedEdits.indexOf(next) + 1} overlap. Edits must target non-overlapping regions.`,
+        failedEdit: current,
+      };
+    }
+  }
+
+  // Phase 3: Apply all edits atomically (from end to start to preserve indices)
+  let result = normalizedCode;
+  const enrichedEdits: EditOperation[] = [];
+
+  // Apply in reverse order so earlier indices remain valid
+  for (let i = validatedEdits.length - 1; i >= 0; i--) {
+    const edit = validatedEdits[i];
+    const { old_string, new_string, matchIndex } = edit;
+
+    // Verify the old_string is still at the expected position
+    if (!result.startsWith(old_string, matchIndex)) {
+      return {
+        success: false,
+        result: code,
+        error: `Edit ${i + 1} failed: Code shifted unexpectedly during application. This should not happen with atomic application.`,
+        failedEdit: edit,
+      };
+    }
 
     // Apply the edit
-    result = result.replace(old_string, new_string);
+    result =
+      result.substring(0, matchIndex) +
+      new_string +
+      result.substring(matchIndex + old_string.length);
 
-    // Store enriched edit with line number
+    // Calculate line number in the final result
+    const lineNumber = getLineNumber(result, new_string);
     enrichedEdits.push({
-      description,
-      old_string,
-      new_string,
+      description: edit.description,
+      old_string: edit.old_string,
+      new_string: edit.new_string,
       lineNumber,
     });
   }
 
+  // Reverse enrichedEdits to match original order
+  enrichedEdits.reverse();
+
   return { success: true, result, enrichedEdits };
+}
+
+// Validate generated code for basic syntax and structure
+function validateCode(code: string): { valid: boolean; error?: string } {
+  const trimmed = code.trim();
+
+  // Check 1: Must start with import
+  if (!trimmed.startsWith("import")) {
+    return {
+      valid: false,
+      error: "Code must start with import statements",
+    };
+  }
+
+  // Check 2: Must end with }; (component closing)
+  if (!trimmed.endsWith("};")) {
+    return {
+      valid: false,
+      error: "Code must end with '};' (component closing brace and semicolon)",
+    };
+  }
+
+  // Check 3: Must have exactly one export const at top level
+  const exportMatches = trimmed.match(/^export\s+const\s+\w+\s*=/gm);
+  if (!exportMatches || exportMatches.length !== 1) {
+    return {
+      valid: false,
+      error: `Must have exactly one top-level 'export const ComponentName =', found ${exportMatches?.length || 0}`,
+    };
+  }
+
+  // Check 4: No nested export (export inside function body)
+  const lines = trimmed.split("\n");
+  let braceDepth = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.startsWith("export ") && braceDepth > 0) {
+      return {
+        valid: false,
+        error: `Nested export found at line ${i + 1}. Export must be at top level.`,
+      };
+    }
+    // Track brace depth to detect function bodies
+    for (const char of line) {
+      if (char === "{") braceDepth++;
+      if (char === "}") braceDepth--;
+    }
+  }
+
+  // Check 5: Balanced braces
+  let openBraces = 0;
+  let openParens = 0;
+  let openBrackets = 0;
+  let inString = false;
+  let stringChar = "";
+  let inTemplate = false;
+
+  for (let i = 0; i < trimmed.length; i++) {
+    const char = trimmed[i];
+    const prevChar = i > 0 ? trimmed[i - 1] : "";
+
+    if (!inString && !inTemplate) {
+      if (char === '"' || char === "'") {
+        inString = true;
+        stringChar = char;
+      } else if (char === "`") {
+        inTemplate = true;
+      } else if (char === "{") openBraces++;
+      else if (char === "}") openBraces--;
+      else if (char === "(") openParens++;
+      else if (char === ")") openParens--;
+      else if (char === "[") openBrackets++;
+      else if (char === "]") openBrackets--;
+    } else if (inString && char === stringChar && prevChar !== "\\") {
+      inString = false;
+    } else if (inTemplate && char === "`" && prevChar !== "\\") {
+      inTemplate = false;
+    }
+
+    if (openBraces < 0 || openParens < 0 || openBrackets < 0) {
+      return {
+        valid: false,
+        error: "Unbalanced brackets/braces/parentheses",
+      };
+    }
+  }
+
+  if (openBraces !== 0 || openParens !== 0 || openBrackets !== 0) {
+    return {
+      valid: false,
+      error: "Unbalanced brackets/braces/parentheses at end of code",
+    };
+  }
+
+  // Check 6: No reserved names used as variables
+  const reservedNames = [
+    "spring",
+    "interpolate",
+    "useCurrentFrame",
+    "useVideoConfig",
+    "AbsoluteFill",
+    "Sequence",
+  ];
+  for (const reserved of reservedNames) {
+    // Check for const/let/var reservedName = ...
+    const regex = new RegExp(`(?:const|let|var)\\s+${reserved}\\s*[=:]`, "g");
+    if (regex.test(trimmed)) {
+      return {
+        valid: false,
+        error: `Reserved name '${reserved}' used as variable. This shadows the Remotion import.`,
+      };
+    }
+  }
+
+  return { valid: true };
+}
+
+// Validate and potentially fix common issues in full replacement code
+function validateAndFixFullCode(code: string): { valid: boolean; error?: string; fixedCode?: string } {
+  const validation = validateCode(code);
+  if (!validation.valid) {
+    return { valid: false, error: validation.error };
+  }
+  return { valid: true, fixedCode: code };
 }
 
 interface ConversationContextMessage {
@@ -295,6 +602,8 @@ interface ErrorCorrectionContext {
     old_string: string;
     new_string: string;
   };
+  /** The code state after any successful edits were applied in this attempt */
+  currentCodeAfterEdits?: string;
 }
 
 interface GenerateRequest {
@@ -352,20 +661,29 @@ export async function POST(req: Request) {
   }
 
   // Parse model ID - format can be "model-name" or "model-name:reasoning_effort"
-  const [modelName, reasoningEffort] = model.split(":");
-
-  // ─── Provider Abstraction Layer ───
-  const aiConfig = getAIConfig();
-  const openai = createOpenAI({
-    apiKey: aiConfig.apiKey || apiKey,
-    baseURL: aiConfig.baseURL,
-  });
-
-  // Validate the prompt first (skip for follow-ups with existing code)
+  // Parse model ID: "name" or "name:reasoning_effort" (only if suffix is valid)
+  // Preserves Ollama tags like ":1.5b", ":7b"
+  const REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high"];
+  let modelName = model;
+  let reasoningEffort: string | undefined;
+  const lastColon = model.lastIndexOf(":");
+  if (lastColon > 0) {
+    const suffix = model.substring(lastColon + 1);
+    if (REASONING_EFFORTS.includes(suffix)) {
+      modelName = model.substring(0, lastColon);
+      reasoningEffort = suffix;
+    }
+  }
+    // ─── Model Router: select a working model ───
+  const routerResult = await selectWorkingModel(modelName);
+  const selectedModel = routerResult.model;
+  const selectedEntry = routerResult.entry;
+  console.log(`[Router] Using ${selectedEntry.fullName} (attempts: ${routerResult.attempts})`);
+// Validate the prompt first (skip for follow-ups with existing code)
   if (!isFollowUp) {
     try {
       const validationResult = await generateObject({
-        model: openai.chat(modelName),
+        model: selectedModel,
         system: VALIDATION_PROMPT,
         prompt: `User prompt: "${prompt}"`,
         schema: z.object({ valid: z.boolean() }),
@@ -391,7 +709,7 @@ export async function POST(req: Request) {
   let detectedSkills: SkillName[] = [];
   try {
     const skillResult = await generateObject({
-      model: openai.chat(modelName),
+      model: selectedModel,
       maxOutputTokens: 16000,
       system: SKILL_DETECTION_PROMPT,
       prompt: `User prompt: "${prompt}"`,
@@ -463,6 +781,16 @@ The previous edit attempt failed. Here's what was tried:
 The old_string was either not found or matched multiple locations. You MUST include more surrounding context to make the match unique.`
           : "";
 
+        // Include current code state after any successful edits for context
+        const currentCodeContext = errorCorrection.currentCodeAfterEdits
+          ? `
+
+## CURRENT CODE STATE (after any successful edits from this attempt):
+\`\`\`tsx
+${errorCorrection.currentCodeAfterEdits}
+\`\`\``
+          : "";
+
         const isEditFailure =
           errorCorrection.error.includes("Edit") &&
           errorCorrection.error.includes("failed");
@@ -473,6 +801,7 @@ The old_string was either not found or matched multiple locations. You MUST incl
 ## EDIT FAILED (ATTEMPT ${errorCorrection.attemptNumber}/${errorCorrection.maxAttempts})
 ${errorCorrection.error}
 ${failedEditInfo}
+${currentCodeContext}
 
 CRITICAL: Your previous edit target was ambiguous or not found. To fix this:
 1. Include MORE surrounding code context in old_string to make it unique
@@ -481,17 +810,21 @@ CRITICAL: Your previous edit target was ambiguous or not found. To fix this:
         } else {
           errorCorrectionNotice = `
 
-## COMPILATION ERROR (ATTEMPT ${errorCorrection.attemptNumber}/${errorCorrection.maxAttempts})
-The previous code failed to compile with this error:
+## COMPILATION/VALIDATION ERROR (ATTEMPT ${errorCorrection.attemptNumber}/${errorCorrection.maxAttempts})
+The previous code failed validation with this error:
 \`\`\`
 ${errorCorrection.error}
 \`\`\`
+${currentCodeContext}
 
-CRITICAL: Fix this compilation error. Common issues include:
+CRITICAL: Fix this validation error. Common issues include:
 - Syntax errors (missing brackets, semicolons)
 - Invalid JSX (unclosed tags, invalid attributes)
 - Undefined variables or imports
-- TypeScript type errors
+- Code must start with 'import' and end with '};'
+- Must have exactly one top-level 'export const ComponentName ='
+- No nested exports inside function bodies
+- Reserved names (spring, interpolate, etc.) cannot be used as variables
 
 Focus ONLY on fixing the error. Do not make other changes.`;
         }
@@ -545,7 +878,7 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
       ];
 
       const editResult = await generateObject({
-        model: openai.chat(modelName),
+        model: selectedModel,
         maxOutputTokens: 16000,
         system: FOLLOW_UP_SYSTEM_PROMPT,
         messages: editMessages,
@@ -562,11 +895,13 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
         const result = applyEdits(currentCode, response.edits);
         if (!result.success) {
           // If edits fail, return error with the failed edit details
+          // Include current code state for error correction
           return new Response(
             JSON.stringify({
               error: result.error,
               type: "edit_failed",
               failedEdit: result.failedEdit,
+              currentCodeAfterEdits: currentCode, // Original code since no edits applied
             }),
             { status: 400, headers: { "Content-Type": "application/json" } },
           );
@@ -577,16 +912,40 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
         appliedEdits = result.enrichedEdits;
         console.log(`Applied ${response.edits.length} edit(s) successfully`);
       } else if (response.type === "full" && response.code) {
-        // Full replacement
-        finalCode = response.code;
+        // Full replacement - validate the code
+        const validation = validateAndFixFullCode(response.code);
+        if (!validation.valid) {
+          return new Response(
+            JSON.stringify({
+              error: validation.error,
+              type: "validation_failed",
+              failedCode: response.code,
+            }),
+            { status: 400, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        finalCode = validation.fixedCode || response.code;
         editType = "full_replacement";
         console.log("Using full code replacement");
       } else {
-        // Invalid response - missing required fields
+        // Invalid response - missing required fields (should not happen with discriminated union)
         return new Response(
           JSON.stringify({
             error: "Invalid AI response: missing required fields",
             type: "edit_failed",
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      // Final validation of the resulting code (both edit and full replacement)
+      const finalValidation = validateCode(finalCode);
+      if (!finalValidation.valid) {
+        return new Response(
+          JSON.stringify({
+            error: `Final code validation failed: ${finalValidation.error}`,
+            type: "validation_failed",
+            failedCode: finalCode,
           }),
           { status: 400, headers: { "Content-Type": "application/json" } },
         );
@@ -649,7 +1008,7 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
     ];
 
     const result = streamText({
-      model: openai.chat(modelName),
+      model: selectedModel,
       maxOutputTokens: 16000,
       system: enhancedSystemPrompt,
       messages: initialMessages,

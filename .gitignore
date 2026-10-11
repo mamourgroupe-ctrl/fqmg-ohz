@@ -54,3 +54,10 @@ build
 # Backups
 *.bak
 *.backup
+
+# ─── Local backups and logs (added after Kilo session) ───
+.backups/
+dev.log
+system-prompt-backup.txt
+*.patch
+route.ts.kilo

@@ -1,4 +1,12 @@
 export const MODELS = [
+  // ─── Ollama (Local) ───
+  { id: "qwen2.5-coder:1.5b", name: "Qwen 2.5 Coder 1.5B (Local)" },
+  { id: "qwen2.5-coder:7b",   name: "Qwen 2.5 Coder 7B (Local)" },
+  // ─── Anthropic (Official) ───
+  { id: "claude-sonnet-4-5-20250929", name: "Claude Sonnet 4.5 (Anthropic)" },
+  { id: "claude-opus-4-5-20250918",   name: "Claude Opus 4.5 (Anthropic)" },
+  { id: "claude-haiku-4-5-20251001",  name: "Claude Haiku 4.5 (Anthropic)" },
+
   { id: "openrouter/free", name: "Auto (Free Router)" },
   { id: "meta-llama/llama-3.3-70b-instruct", name: "Llama 3.3 70B" },
   { id: "google/gemini-2.0-flash-exp", name: "Gemini 2.0 Flash" },
@@ -24,4 +32,3 @@ export const ASPECT_RATIOS = {
 
 export type AspectRatioId = keyof typeof ASPECT_RATIOS;
 export type AspectRatio = (typeof ASPECT_RATIOS)[AspectRatioId];
-

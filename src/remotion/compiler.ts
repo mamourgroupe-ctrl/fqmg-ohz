@@ -21,6 +21,7 @@ import {
   spring,
   useCurrentFrame,
   useVideoConfig,
+  staticFile,
 } from "remotion";
 import * as THREE from "three";
 import { loadFont as loadCairo } from "@remotion/google-fonts/Cairo";
@@ -36,29 +37,13 @@ export interface CompilationResult {
 
 // Strip imports and extract component body from LLM-generated code
 // Safety layer in case LLM includes full ES6 syntax despite instructions
-function cleanNestedExport(code: string): string {
-  const match = code.match(/export\s+const\s+\w+\s*=\s*\(\s*\)\s*=>\s*\{/);
-  if (!match || match.index === undefined || match.index === 0) return code;
-  const start = match.index;
-  let depth = 1;
-  let i = start + match[0].length;
-  while (i < code.length && depth > 0) {
-    const ch = code[i];
-    if (ch === "{") depth++;
-    else if (ch === "}") depth--;
-    i++;
-  }
-  if (depth !== 0) return code;
-  return code.slice(start, i);
-}
-
 // ─── Fix common AI syntax errors ───
 function fixCommonSyntaxErrors(code: string): string {
-  // Fix `const NAME NAME = ...` → `const NAME_NAME = ...`
-  // Handles cases like `const COLOR UNDERLINE = "#fff"`
+    // Fix `const NAME NAME NAME = ...` → `const NAME_NAME_NAME = ...`
+  // Handles any number of uppercase words: COLOR UNDERLINE, LOGO ENTER DURATION, etc.
   code = code.replace(
-    /const\s+([A-Z][A-Z0-9]*)\s+([A-Z][A-Z0-9]*)\s*=/g,
-    "const $1_$2 =",
+    /const\s+([A-Z][A-Z0-9]*(?:\s+[A-Z][A-Z0-9]*)+)\s*=/g,
+    (match, names) => `const ${names.replace(/\s+/g, "_")} =`,
   );
 
   // Fix `const name name = ...` (lowercase)
@@ -75,49 +60,42 @@ function fixCommonSyntaxErrors(code: string): string {
 }
 
 function extractComponentBody(code: string): string {
-  // Strip all import statements (handles multi-line imports with newlines in braces)
-  let cleaned = cleanNestedExport(code);
-  cleaned = fixCommonSyntaxErrors(cleaned);
-
-  // Remove type imports: import type { ... } from "...";
-  cleaned = cleaned.replace(
-    /import\s+type\s*\{[\s\S]*?\}\s*from\s*["'][^"']+["'];?/g,
-    "",
-  );
-  // Remove combined default + named imports: import X, { ... } from "...";
-  cleaned = cleaned.replace(
-    /import\s+\w+\s*,\s*\{[\s\S]*?\}\s*from\s*["'][^"']+["'];?/g,
-    "",
-  );
-  // Remove multi-line named imports: import { ... } from "...";
-  cleaned = cleaned.replace(
-    /import\s*\{[\s\S]*?\}\s*from\s*["'][^"']+["'];?/g,
-    "",
-  );
-  // Remove namespace imports: import * as X from "...";
-  cleaned = cleaned.replace(
-    /import\s+\*\s+as\s+\w+\s+from\s*["'][^"']+["'];?/g,
-    "",
-  );
-  // Remove default imports: import X from "...";
-  cleaned = cleaned.replace(/import\s+\w+\s+from\s*["'][^"']+["'];?/g, "");
-  // Remove side-effect imports: import "...";
-  cleaned = cleaned.replace(/import\s*["'][^"']+["'];?/g, "");
-
+  // Step 1: Strip ALL import statements
+  let cleaned = code;
+  cleaned = cleaned.replace(/import\s+type\s*\{[\s\S]*?\}\s*from\s*["'`][^"'`]+["'`];?/g, "");
+  cleaned = cleaned.replace(/import\s+\w+\s*,\s*\{[\s\S]*?\}\s*from\s*["'`][^"'`]+["'`];?/g, "");
+  cleaned = cleaned.replace(/import\s*\{[\s\S]*?\}\s*from\s*["'`][^"'`]+["'`];?/g, "");
+  cleaned = cleaned.replace(/import\s+\*\s+as\s+\w+\s+from\s*["'`][^"'`]+["'`];?/g, "");
+  cleaned = cleaned.replace(/import\s+\w+\s+from\s*["'`][^"'`]+["'`];?/g, "");
+  cleaned = cleaned.replace(/import\s*["'`][^"'`]+["'`];?/g, "");
   cleaned = cleaned.trim();
 
-  // Extract body from "export const MyAnimation = () => { ... };"
-  const match = cleaned.match(
-    /^([\s\S]*?)export\s+const\s+\w+\s*=\s*\(\s*\)\s*=>\s*\{([\s\S]*)\};?\s*$/,
-  );
+  // Step 2: Fix common syntax errors
+  cleaned = fixCommonSyntaxErrors(cleaned);
 
+  // Step 3: Extract helpers + body from `export const X = () => {...}`
+  const match = cleaned.match(/^([\s\S]*?)export\s+const\s+\w+\s*=\s*\(\s*\)\s*=>\s*\{([\s\S]*)\};?\s*$/);
   if (match) {
     const helpers = match[1].trim();
     const body = match[2].trim();
+    // Clean any remaining export keywords
+    const cleanedHelpers = helpers.replace(/^\s*export\s+/gm, "");
+    const cleanedBody = body.replace(/^\s*export\s+/gm, "");
+    return cleanedHelpers
+      ? `${cleanedHelpers}\n\n${cleanedBody}`
+      : cleanedBody;
+  }
+
+  // Step 4: Fallback - const X = () => {...}
+  const fallbackMatch = cleaned.match(/^([\s\S]*?)const\s+\w+\s*=\s*\(\s*\)\s*=>\s*\{([\s\S]*)\};?\s*$/);
+  if (fallbackMatch) {
+    const helpers = fallbackMatch[1].trim();
+    const body = fallbackMatch[2].trim();
     return helpers ? `${helpers}\n\n${body}` : body;
   }
 
-  return cleaned;
+  // Step 5: Last resort
+  return cleaned.replace(/^\s*export\s+/gm, "");
 }
 
 // Standalone compile function for use outside React components
@@ -147,6 +125,7 @@ export function compileCode(code: string): CompilationResult {
       spring,
       Sequence,
       Img,
+      staticFile,
     };
 
     const wrappedCode = `${transpiled.code}\nreturn DynamicAnimation;`;
@@ -165,6 +144,7 @@ export function compileCode(code: string): CompilationResult {
       "spring",
       "Sequence",
       "Img",
+      "staticFile",
       "useState",
       "useEffect",
       "useMemo",
@@ -211,6 +191,7 @@ export function compileCode(code: string): CompilationResult {
       spring,
       Sequence,
       Img,
+      staticFile,
       useState,
       useEffect,
       useMemo,
