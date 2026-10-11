@@ -114,7 +114,83 @@ Example:
   خزانات مياه بجودة عالية
 </div>
 
-Available Arabic fonts: Cairo (primary), Tajawal (alternative).
+Available Arabic fonts:
+
+## DURATION CALCULATIONS - CRITICAL
+
+NEVER confuse frames with seconds:
+- fps = useVideoConfig().fps (usually 30)
+- durationInFrames = seconds * fps
+- 15 seconds at 30fps = 450 frames
+
+CORRECT PATTERN:
+const { fps } = useVideoConfig();
+const TOTAL_FRAMES = 15 * fps;      // 450
+const SCENE_DURATION = TOTAL_FRAMES / 3;  // 150
+
+// Three full scenes, each 150 frames:
+<Sequence from={0} durationInFrames={SCENE_DURATION}>
+  <AbsoluteFill>actual scene 1 content here</AbsoluteFill>
+</Sequence>
+<Sequence from={SCENE_DURATION} durationInFrames={SCENE_DURATION}>
+  <AbsoluteFill>actual scene 2 content here</AbsoluteFill>
+</Sequence>
+<Sequence from={SCENE_DURATION * 2} durationInFrames={SCENE_DURATION}>
+  <AbsoluteFill>actual scene 3 content here</AbsoluteFill>
+</Sequence>
+
+⚠️ NEVER write "..." or "actual scene content" in the OUTPUT CODE.
+Write REAL, COMPLETE JSX with actual elements.
+
+## NO PLACEHOLDER TEXT - CRITICAL
+
+NEVER output comments like "// scene here" or "..." in JSX.
+Every JSX element must contain the REAL content:
+- Real <Img src={staticFile(...)} />
+- Real <div> with Arabic or English text
+- Real styles
+
+BAD (causes crash):
+<Sequence>{/* scene 1 here */}</Sequence>
+<Sequence>...</Sequence>
+
+GOOD:
+<Sequence durationInFrames={150}>
+  <AbsoluteFill>
+    <Img src={staticFile("/assets/logo-hp.jpeg")} style={{width: "100%"}} />
+    <div style={{fontFamily: "Cairo"}}>HEMMAMI PLAST</div>
+  </AbsoluteFill>
+</Sequence>
+
+
+## TRANSITIONSERIES - CRITICAL
+
+TransitionSeries crashes if <Transition /> is missing between sequences.
+Error: "Element type is invalid: SeriesSequence undefined".
+
+STRONGLY PREFERRED: use plain <Sequence> + opacity interpolation.
+Only use TransitionSeries if user explicitly requests "transitions".
+
+CORRECT TransitionSeries:
+<TransitionSeries>
+  <TransitionSeries.Sequence durationInFrames={90}>...</TransitionSeries.Sequence>
+  <TransitionSeries.Transition presentation={fade()} timing={linearTiming({ durationInFrames: 15 })} />
+  <TransitionSeries.Sequence durationInFrames={90}>...</TransitionSeries.Sequence>
+</TransitionSeries>
+
+PREFERRED (safe):
+<Sequence from={0} durationInFrames={90}>
+  <AbsoluteFill style={{ opacity: interpolate(frame, [75, 90], [1, 0], {extrapolateLeft: "clamp", extrapolateRight: "clamp"}) }}>
+    ...scene 1...
+  </AbsoluteFill>
+</Sequence>
+<Sequence from={75} durationInFrames={90}>
+  <AbsoluteFill style={{ opacity: interpolate(frame, [75, 90, 150, 165], [0, 1, 1, 0], {extrapolateLeft: "clamp", extrapolateRight: "clamp"}) }}>
+    ...scene 2...
+  </AbsoluteFill>
+</Sequence>
+
+ Cairo (primary), Tajawal (alternative).
 
 ## IMAGES AND ASSETS (CRITICAL)
 
