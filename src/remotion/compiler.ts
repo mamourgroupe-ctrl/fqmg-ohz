@@ -59,9 +59,101 @@ function fixCommonSyntaxErrors(code: string): string {
   return code;
 }
 
+// ─── Ensure required Remotion imports are present ───
+const REMOTION_IMPORTS = [
+  "staticFile",
+  "Img",
+  "AbsoluteFill",
+  "Sequence",
+  "interpolate",
+  "useCurrentFrame",
+  "useVideoConfig",
+  "spring",
+] as const;
+
+type RemotionImport = (typeof REMOTION_IMPORTS)[number];
+
+function ensureRequiredImports(code: string): string {
+  // Detect which Remotion imports are used in the code
+  const usedImports = new Set<RemotionImport>();
+
+  for (const imp of REMOTION_IMPORTS) {
+    // Check for usage patterns: staticFile(, <Img, AbsoluteFill, Sequence, interpolate(, useCurrentFrame(, useVideoConfig(, spring(
+    const patterns: RegExp[] = [
+      new RegExp(`\\b${imp}\\s*\\(`), // function call: staticFile(
+      new RegExp(`<${imp}\\b`), // JSX element: <Img
+      new RegExp(`\\b${imp}\\b`), // general identifier usage
+    ];
+
+    for (const pattern of patterns) {
+      if (pattern.test(code)) {
+        usedImports.add(imp);
+        break;
+      }
+    }
+  }
+
+  if (usedImports.size === 0) {
+    return code; // No Remotion imports needed
+  }
+
+  // Find existing import from "remotion"
+  const importRegex = /^import\s*\{([^}]+)\}\s*from\s*["']remotion["'];?/m;
+  const match = code.match(importRegex);
+
+  if (match) {
+    // Existing import found - merge missing imports
+    const existingImports = match[1]
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const existingSet = new Set(existingImports);
+
+    const missingImports = Array.from(usedImports).filter((imp) => !existingSet.has(imp));
+
+    if (missingImports.length === 0) {
+      return code; // All needed imports already present
+    }
+
+    // Merge and rebuild import statement
+    const allImports = [...Array.from(existingImports), ...missingImports].sort();
+    const newImport = `import { ${allImports.join(", ")} } from "remotion";`;
+    return code.replace(importRegex, newImport);
+  }
+
+  // Check for default import: import something from "remotion"
+  const defaultImportRegex = /^import\s+(\w+)\s+from\s*["']remotion["'];?/m;
+  const defaultMatch = code.match(defaultImportRegex);
+
+  if (defaultMatch) {
+    // Convert default import to named import with all needed
+    const allImports = Array.from(usedImports).sort();
+    const newImport = `import { ${allImports.join(", ")} } from "remotion";`;
+    return code.replace(defaultImportRegex, newImport);
+  }
+
+  // Check for namespace import: import * as X from "remotion"
+  const namespaceImportRegex = /^import\s*\*\s+as\s+\w+\s+from\s*["']remotion["'];?/m;
+  const namespaceMatch = code.match(namespaceImportRegex);
+
+  if (namespaceMatch) {
+    // Add named import alongside namespace import
+    const allImports = Array.from(usedImports).sort();
+    const newImport = `import { ${allImports.join(", ")} } from "remotion";`;
+    return code.replace(namespaceImportRegex, `${namespaceMatch[0]}\n${newImport}`);
+  }
+
+  // No existing remotion import - add new one at the top
+  const allImports = Array.from(usedImports).sort();
+  const newImport = `import { ${allImports.join(", ")} } from "remotion";\n`;
+  return newImport + code;
+}
+
 function extractComponentBody(code: string): string {
+  // Step 0: Ensure required Remotion imports are present
+  let cleaned = ensureRequiredImports(code);
+
   // Step 1: Strip ALL import statements
-  let cleaned = code;
   cleaned = cleaned.replace(/import\s+type\s*\{[\s\S]*?\}\s*from\s*["'`][^"'`]+["'`];?/g, "");
   cleaned = cleaned.replace(/import\s+\w+\s*,\s*\{[\s\S]*?\}\s*from\s*["'`][^"'`]+["'`];?/g, "");
   cleaned = cleaned.replace(/import\s*\{[\s\S]*?\}\s*from\s*["'`][^"'`]+["'`];?/g, "");
