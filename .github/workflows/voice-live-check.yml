@@ -1,14 +1,13 @@
 # Manual live voice check (Phase 2). Calls the real Azure Speech API once per step with the
 # credentials stored in GitHub Secrets, then uploads the audio and JSON summary as an artifact.
 #
-# PLACEMENT: GitHub runs only the copy stored in the repository-root .github/workflows/ directory.
-# A byte-identical mirror is kept at fqmg-ohz-next/.github/workflows/; keep the two files identical.
-# GitHub lists this workflow, and offers the Run workflow button, only once the file exists on the
-# default branch (main).
+# PLACEMENT: GitHub runs only the copy stored in the repository-root .github/workflows/ directory,
+# which is where this file lives once it is on the default branch. GitHub lists the workflow, and
+# offers the Run workflow button, only once the file exists on the default branch (main).
 #
-# CODE SOURCE: the checkout step pins the branch arena/ede0565d-fqmg-ohz, where the project code
-# lives until PR #1 is merged. After PR #1 is merged and that branch is deleted, change the ref to
-# main. The steps use working-directory: fqmg-ohz-next.
+# CODE SOURCE: the project lives at the repository root (the former fqmg-ohz-next/ sub-project was
+# merged into the root). The `code_ref` input selects which branch to check out; it defaults to
+# main. Pass the working branch name when you want to run this before the merge lands on main.
 #
 # TRIGGER: workflow_dispatch only (manual). It is not triggered by pushes or pull requests.
 # Running it makes real, billable provider requests.
@@ -23,6 +22,10 @@ name: Voice live check (manual)
 on:
   workflow_dispatch:
     inputs:
+      code_ref:
+        description: Branch or tag to check out and run the live check against.
+        type: string
+        default: main
       provider:
         description: Voice provider to check. Only azure is supported by this check.
         type: choice
@@ -42,21 +45,18 @@ jobs:
     name: Live check (${{ inputs.provider }})
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: fqmg-ohz-next
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
         with:
-          ref: arena/ede0565d-fqmg-ohz
+          ref: ${{ inputs.code_ref }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: fqmg-ohz-next/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -114,7 +114,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: voice-live-check-${{ inputs.provider }}-${{ github.run_id }}
-          path: fqmg-ohz-next/voice-live-output/
+          path: voice-live-output/
           if-no-files-found: warn
           retention-days: 7
 

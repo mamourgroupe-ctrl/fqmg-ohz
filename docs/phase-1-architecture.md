@@ -1,5 +1,10 @@
 # Phase 1 — حدود المعمارية
 
+> **ملاحظة الدمج (2026-10-12):** نُقل كود `fqmg-ohz-next/` إلى جذر المستودع، فصارت المسارات المذكورة هنا
+> (`src/ai`, `src/motion`, `src/render`, `src/voice`, `src/remotion/entry.tsx`) مسارات جذرية مباشرة،
+> ومسار المخطط `POST /api/generate` (داخل المشروع الفرعي) أصبح `POST /api/plan`. لم تُعدَّل الحدود
+> الأمنية ولا القرارات المعمارية الموصوفة أدناه.
+
 ## مسار البيانات الحالي
 
 `Prompt + خيارات آمنة → DirectorProvider → خطة محلية قابلة للتكرار → Scene Planner → MotionSpecificationSchema → Remotion composition blueprint`

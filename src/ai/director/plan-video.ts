@@ -65,7 +65,7 @@ export async function createDirectorPlan(
   const motionSpecification = MotionSpecificationSchema.parse({
     project: {
       id: `project-${randomUUID()}`,
-      title: request.title ?? brand?.name ?? "FQMG-OHZ NEXT — New video",
+      title: request.title ?? brand?.name ?? "FQMG-OHZ — New video",
       prompt: request.prompt,
       videoKind: brief.videoKind,
       language: brief.language,

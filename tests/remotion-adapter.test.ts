@@ -12,7 +12,7 @@ describe("Remotion adapter", () => {
     expect(assessment.supported).toBe(true);
     const blueprint = adapter.createBlueprint(specification);
     expect(blueprint).toMatchObject({
-      id: "FQMG-OHZ-NEXT-Preview",
+      id: "FQMG-OHZ-Preview",
       width: 1080,
       height: 1920,
       fps: 30,

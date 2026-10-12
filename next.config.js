@@ -18,6 +18,8 @@ const nextConfig = {
     });
     return config;
   },
+  // The sandboxed live preview serves the dev server from a *.e2b.app subdomain.
+  allowedDevOrigins: ["*.e2b.app"],
 };
 
 module.exports = nextConfig;

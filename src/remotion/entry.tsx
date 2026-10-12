@@ -11,7 +11,7 @@ type CompositionInput = z.infer<typeof CompositionInputSchema>;
 
 const RemotionRoot: FC = () => (
   <Composition<typeof CompositionInputSchema, CompositionInput>
-    id="FQMG-OHZ-NEXT-Preview"
+    id="FQMG-OHZ-Preview"
     schema={CompositionInputSchema}
     component={MotionComposition as FC<MotionCompositionProps>}
     width={initialSpecification.composition.width}

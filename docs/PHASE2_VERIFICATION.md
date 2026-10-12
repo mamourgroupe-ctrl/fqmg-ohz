@@ -1,5 +1,13 @@
 # Phase 2 integration verification
 
+> **Merge note (2026-10-12):** this report is kept as the dated record of the verification run.
+> The `fqmg-ohz-next/` sub-project it describes was merged into the repository root on 2026-10-12,
+> so every `fqmg-ohz-next/...` path below refers to the former location of the same files.
+> The composition id `FQMG-OHZ-NEXT-Preview` is now `FQMG-OHZ-Preview`, and the plan route that used
+> to be `POST /api/generate` inside the sub-project is now `POST /api/plan` at the repository root
+> (`/api/generate` belongs to the original prompt-to-code UI). No verification result or date was
+> changed.
+
 - **Verified:** 2026-10-09
 - **Scope:** `fqmg-ohz-next/` only · branch `arena/ede0565d-fqmg-ohz` · PR #1 (open, not merged)
 - **Outcome:** Code-level checks pass on the final code: 119 of 119 tests (15 files), typecheck, lint, and production build. The Azure live voice check is prepared but **has not been run**, and no provider was called from this sandbox. **No Remotion composition render was produced.** Chrome Headless Shell cannot be downloaded or installed from this sandbox. A Remotion bundle compile check passed; a bundle is not a render.

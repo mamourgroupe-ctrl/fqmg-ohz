@@ -1,5 +1,5 @@
 /**
- * Manual live voice check (Phase 2). Run from fqmg-ohz-next/:
+ * Manual live voice check (Phase 2). Run from the repository root:
  *   npm run voice:live-check:plan   prints exactly what a live run would send. No request, no file.
  *   npm run voice:live-check        LIVE: sends the requests the plan lists, on your own machine.
  *   Do not append --plan to voice:live-check: npm drops it, and the live run starts instead.

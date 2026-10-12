@@ -1,6 +1,12 @@
 # Phase 2 — Universal Voice Engine: audit, compatibility, implementation, and verification
 
-**Scope:** Phase 2 only, inside `fqmg-ohz-next/`. Phase 0/1 foundations remain in place. Phase 3, Adobe, Pinterest, subscriptions, and billing are out of scope.
+> **Merge note (2026-10-12):** the `fqmg-ohz-next/` sub-project described here was merged into the
+> repository root. Paths written as `fqmg-ohz-next/<...>` now live at `<...>` from the root, the
+> composition id `FQMG-OHZ-NEXT-Preview` is now `FQMG-OHZ-Preview`, and the data-only plan route is
+> now `POST /api/plan` (the sub-project's old `POST /api/generate` path is occupied by the original
+> prompt-to-code route). No result or claim below was changed.
+
+**Scope:** Phase 2 only, inside `fqmg-ohz-next/` (now the repository root). Phase 0/1 foundations remain in place. Phase 3, Adobe, Pinterest, subscriptions, and billing are out of scope.
 
 ## 1. Compatibility audit
 

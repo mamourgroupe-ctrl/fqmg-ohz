@@ -5,7 +5,7 @@ import {
 import type { RendererAdapter, RendererAssessment } from "@/render/engine/renderer-adapter";
 
 export interface RemotionCompositionBlueprint {
-  id: "FQMG-OHZ-NEXT-Preview";
+  id: "FQMG-OHZ-Preview";
   width: number;
   height: number;
   fps: number;
@@ -53,7 +53,7 @@ export class RemotionAdapter implements RendererAdapter<RemotionCompositionBluep
     }
 
     return {
-      id: "FQMG-OHZ-NEXT-Preview",
+      id: "FQMG-OHZ-Preview",
       width: parsed.composition.width,
       height: parsed.composition.height,
       fps: parsed.composition.fps,

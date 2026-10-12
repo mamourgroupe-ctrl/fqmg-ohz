@@ -176,7 +176,7 @@ export class AzureSpeechAdapter implements VoiceProviderAdapter {
         "Ocp-Apim-Subscription-Key": key,
         "Content-Type": "application/ssml+xml",
         "X-Microsoft-OutputFormat": "audio-24khz-160kbitrate-mono-mp3",
-        "User-Agent": "fqmg-ohz-next-voice-engine",
+        "User-Agent": "fqmg-ohz-voice-engine",
       },
       body: ssml,
       signal,
