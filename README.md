@@ -189,6 +189,7 @@ npm run build
 - [`docs/phase-2-plan.md`](docs/phase-2-plan.md) — Phase 2 compatibility audit and implementation
 - [`docs/PHASE2_VERIFICATION.md`](docs/PHASE2_VERIFICATION.md) — dated verification record
 - [`docs/current-architecture.md`](docs/current-architecture.md) — audit of the original project
+- [`docs/artcraft-integration-assessment.md`](docs/artcraft-integration-assessment.md) — why ArtCraft (Rust/Tauri desktop IDE) cannot be merged as code, and the Omni-API provider option
 
 > **Deployment boundary:** there is no user authentication, authorization, or distributed rate
 > limiting yet. Do not expose `POST /api/voice/synthesize` publicly with provider credentials before
