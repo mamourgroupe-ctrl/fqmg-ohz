@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "es5",
+    "target": "ES2020",
     "lib": [
       "dom",
       "dom.iterable",
@@ -26,8 +26,12 @@
     "incremental": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"],
-      "react": ["../../node_modules/@types/react"]
+      "@/*": [
+        "./src/*"
+      ],
+      "react": [
+        "../../node_modules/@types/react"
+      ]
     }
   },
   "include": [
@@ -35,11 +39,12 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    "remotion/webpack-override.mjs",
+    "src/remotion/webpack-override.mjs",
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
-    "remotion.config.ts"
+    "remotion.config.ts",
+    "renders"
   ]
 }
