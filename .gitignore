@@ -61,3 +61,31 @@ dev.log
 system-prompt-backup.txt
 *.patch
 route.ts.kilo
+
+# Phase 2 local state: managed audio cache and project voice pins
+.voice-cache/
+
+# Voice live-check outputs (inventory, summary, sample audio)
+voice-live-output/
+
+# Remotion render outputs
+renders/
+*.mov
+*.webm
+*.mkv
+
+# Audio artifacts from voice synthesis or rendering
+*.mp3
+*.wav
+*.m4a
+*.aac
+*.ogg
+*.opus
+*.flac
+*.aiff
+!public/**/*.mp3
+!public/**/*.wav
+
+# Remotion browser cache fallback (default lives in node_modules/.remotion)
+.remotion/
+dist/

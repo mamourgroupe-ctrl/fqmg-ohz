@@ -18,6 +18,11 @@ export default [
       ".next/**",
       "out/**",
       "build/**",
+      "renders/**",
+      ".voice-cache/**",
+      "voice-live-output/**",
+      // Vendored Remotion skill references (docs/samples), not application code.
+      ".agents/**",
       "next-env.d.ts",
       "next.config.js",
       "deploy.mjs",
@@ -57,6 +62,41 @@ export default [
     files: ["src/remotion/**"],
     rules: {
       ...offNextRules,
+    },
+  },
+  // Node-context module config files (e.g. src/remotion/webpack-override.mjs)
+  {
+    files: ["**/*.mjs", "**/*.cjs"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        console: "readonly",
+        Buffer: "readonly",
+        __dirname: "readonly",
+        __filename: "readonly",
+        module: "writable",
+        require: "readonly",
+        exports: "writable",
+      },
+    },
+  },
+  // Motion Specification / voice engine modules, tests, and local scripts
+  // (moved into the root project from fqmg-ohz-next/).
+  {
+    files: [
+      "src/ai/**/*.{ts,tsx}",
+      "src/motion/**/*.{ts,tsx}",
+      "src/render/**/*.{ts,tsx}",
+      "src/voice/**/*.{ts,tsx}",
+      "tests/**/*.ts",
+      "scripts/**/*.ts",
+      "vitest.config.ts",
+    ],
+    rules: {
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+      ],
     },
   },
 ];
