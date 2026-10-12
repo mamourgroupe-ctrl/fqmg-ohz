@@ -23,7 +23,12 @@ import {
   useVideoConfig,
 } from "remotion";
 import * as THREE from "three";
+import { loadFont as loadCairo } from "@remotion/google-fonts/Cairo";
+import { loadFont as loadTajawal } from "@remotion/google-fonts/Tajawal";
 
+// ─── Preload Arabic Fonts (available at render time) ───
+loadCairo(); // preload Cairo
+loadTajawal(); // preload Tajawal
 export interface CompilationResult {
   Component: React.ComponentType | null;
   error: string | null;
@@ -31,9 +36,48 @@ export interface CompilationResult {
 
 // Strip imports and extract component body from LLM-generated code
 // Safety layer in case LLM includes full ES6 syntax despite instructions
+function cleanNestedExport(code: string): string {
+  const match = code.match(/export\s+const\s+\w+\s*=\s*\(\s*\)\s*=>\s*\{/);
+  if (!match || match.index === undefined || match.index === 0) return code;
+  const start = match.index;
+  let depth = 1;
+  let i = start + match[0].length;
+  while (i < code.length && depth > 0) {
+    const ch = code[i];
+    if (ch === "{") depth++;
+    else if (ch === "}") depth--;
+    i++;
+  }
+  if (depth !== 0) return code;
+  return code.slice(start, i);
+}
+
+// ─── Fix common AI syntax errors ───
+function fixCommonSyntaxErrors(code: string): string {
+  // Fix `const NAME NAME = ...` → `const NAME_NAME = ...`
+  // Handles cases like `const COLOR UNDERLINE = "#fff"`
+  code = code.replace(
+    /const\s+([A-Z][A-Z0-9]*)\s+([A-Z][A-Z0-9]*)\s*=/g,
+    "const $1_$2 =",
+  );
+
+  // Fix `const name name = ...` (lowercase)
+  code = code.replace(
+    /const\s+([a-z][a-zA-Z0-9]*)\s+([a-z][a-zA-Z0-9]*)\s*=/g,
+    (match, a, b) => {
+      if (a === b) return match; // ignore "const x x ="
+      return `const ${a}${b.charAt(0).toUpperCase() + b.slice(1)} =`;
+    },
+  );
+
+
+  return code;
+}
+
 function extractComponentBody(code: string): string {
   // Strip all import statements (handles multi-line imports with newlines in braces)
-  let cleaned = code;
+  let cleaned = cleanNestedExport(code);
+  cleaned = fixCommonSyntaxErrors(cleaned);
 
   // Remove type imports: import type { ... } from "...";
   cleaned = cleaned.replace(

@@ -11,9 +11,12 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Settings } from "lucide-react";
+import { ASPECT_RATIOS, type AspectRatioId } from "@/types/generation";
 import { useEffect, useState } from "react";
 
 interface SettingsModalProps {
+  aspectRatio: AspectRatioId;
+  onAspectRatioChange: (id: AspectRatioId) => void;
   durationInFrames: number;
   onDurationChange: (duration: number) => void;
   fps: number;
@@ -25,6 +28,8 @@ export function SettingsModal({
   onDurationChange,
   fps,
   onFpsChange,
+  aspectRatio,
+  onAspectRatioChange,
 }: SettingsModalProps) {
   const [open, setOpen] = useState(false);
   const [localDuration, setLocalDuration] = useState(String(durationInFrames));
@@ -110,6 +115,23 @@ export function SettingsModal({
                   className="w-full px-3 py-2 rounded border border-border bg-input text-foreground text-sm font-sans focus:outline-none focus:border-primary"
                 />
               </div>
+            </div>
+            <div className="grid gap-2">
+              <label htmlFor="aspectRatio" className="text-muted-foreground text-sm">
+                Aspect Ratio
+              </label>
+              <select
+                id="aspectRatio"
+                value={aspectRatio}
+                onChange={(e) => onAspectRatioChange(e.target.value as AspectRatioId)}
+                className="w-full px-3 py-2 rounded border border-border bg-input text-foreground text-sm font-sans focus:outline-none focus:border-primary"
+              >
+                {Object.entries(ASPECT_RATIOS).map(([id, config]) => (
+                  <option key={id} value={id}>
+                    {config.label}
+                  </option>
+                ))}
+              </select>
             </div>
             <p className="text-xs text-muted-foreground-dim">
               Video length: {(durationInFrames / fps).toFixed(2)}s (

@@ -5,6 +5,7 @@ import {
   type SkillName,
 } from "@/skills";
 import { createOpenAI } from "@ai-sdk/openai";
+import { getAIConfig } from "@/lib/ai-provider";
 import { generateObject, streamText } from "ai";
 import { z } from "zod";
 
@@ -39,11 +40,18 @@ Return true if the prompt is valid for motion graphics generation, false otherwi
 const SYSTEM_PROMPT = `
 You are an expert in generating React components for Remotion animations.
 
-## COMPONENT STRUCTURE
+## COMPONENT STRUCTURE (CRITICAL - READ TWICE)
 
 1. Start with ES6 imports
-2. Export as: export const MyAnimation = () => { ... };
-3. Component body order:
+2. Export EXACTLY ONE component: export const MyAnimation = () => { ... };
+3. The word "export" MUST be at TOP LEVEL of file - NEVER inside another function
+4. NEVER write "export" inside a { ... } block or another arrow function
+5. NEVER write two overlapping arrow functions like:
+   "const A = () => { export const B = () => {...} }" - THIS IS FORBIDDEN
+6. Structure MUST be: imports, then export const MyAnimation = () => { ... }, then end
+7. NOTHING comes before the imports, NOTHING after the final closing brace
+
+8. Component body order:
    - Multi-line comment description (2-3 sentences)
    - Hooks (useCurrentFrame, useVideoConfig, etc.)
    - Constants (COLORS, TEXT, TIMING, LAYOUT) - all UPPER_SNAKE_CASE
@@ -90,6 +98,22 @@ import { useState, useEffect } from "react";
 NEVER use these as variable names - they shadow imports:
 - spring, interpolate, useCurrentFrame, useVideoConfig, AbsoluteFill, Sequence
 
+
+## ARABIC TEXT SUPPORT (CRITICAL)
+
+When the prompt contains Arabic text or requires Arabic labels:
+1. ALWAYS use fontFamily: "Cairo, sans-serif" for Arabic text
+2. Add direction: "rtl" and textAlign: "center" to the container
+3. Use fontSize slightly larger than Latin (Arabic needs more space)
+4. Add lineHeight: 1.4 or higher for readability
+5. Do NOT mix Arabic and Latin fonts in the same element
+
+Example:
+<div style={{ fontFamily: "Cairo, sans-serif", direction: "rtl", textAlign: "center", fontSize: 48, lineHeight: 1.4 }}>
+  خزانات مياه بجودة عالية
+</div>
+
+Available Arabic fonts: Cairo (primary), Tajawal (alternative).
 ## STYLING RULES
 
 - Use inline styles only
@@ -138,6 +162,11 @@ CRITICAL:
 
 ## PRESERVING USER EDITS
 If the user has made manual edits, preserve them unless explicitly asked to change.
+
+## CRITICAL STRUCTURE RULE
+When returning full replacement code (type: "full"):
+- The export statement MUST be at TOP LEVEL of the file
+- NEVER nest the export keyword inside another function or arrow function body
 `;
 
 // Schema for follow-up edit responses
@@ -297,7 +326,7 @@ interface GenerateResponse {
 export async function POST(req: Request) {
   const {
     prompt,
-    model = "gpt-5.2",
+    model = "claude-sonnet-5",
     currentCode,
     conversationHistory = [],
     isFollowUp = false,
@@ -325,13 +354,18 @@ export async function POST(req: Request) {
   // Parse model ID - format can be "model-name" or "model-name:reasoning_effort"
   const [modelName, reasoningEffort] = model.split(":");
 
-  const openai = createOpenAI({ apiKey });
+  // ─── Provider Abstraction Layer ───
+  const aiConfig = getAIConfig();
+  const openai = createOpenAI({
+    apiKey: aiConfig.apiKey || apiKey,
+    baseURL: aiConfig.baseURL,
+  });
 
   // Validate the prompt first (skip for follow-ups with existing code)
   if (!isFollowUp) {
     try {
       const validationResult = await generateObject({
-        model: openai("gpt-5.2"),
+        model: openai.chat(modelName),
         system: VALIDATION_PROMPT,
         prompt: `User prompt: "${prompt}"`,
         schema: z.object({ valid: z.boolean() }),
@@ -357,7 +391,8 @@ export async function POST(req: Request) {
   let detectedSkills: SkillName[] = [];
   try {
     const skillResult = await generateObject({
-      model: openai("gpt-5.2"),
+      model: openai.chat(modelName),
+      maxOutputTokens: 16000,
       system: SKILL_DETECTION_PROMPT,
       prompt: `User prompt: "${prompt}"`,
       schema: z.object({
@@ -510,7 +545,8 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
       ];
 
       const editResult = await generateObject({
-        model: openai(modelName),
+        model: openai.chat(modelName),
+        maxOutputTokens: 16000,
         system: FOLLOW_UP_SYSTEM_PROMPT,
         messages: editMessages,
         schema: FollowUpResponseSchema,
@@ -613,7 +649,8 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
     ];
 
     const result = streamText({
-      model: openai(modelName),
+      model: openai.chat(modelName),
+      maxOutputTokens: 16000,
       system: enhancedSystemPrompt,
       messages: initialMessages,
       ...(reasoningEffort && {
@@ -684,3 +721,6 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
     );
   }
 }
+
+
+
