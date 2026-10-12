@@ -21,6 +21,7 @@ export default [
       "next-env.d.ts",
       "next.config.js",
       "deploy.mjs",
+      ".agents/**",
     ],
   },
   // Base JS recommended
