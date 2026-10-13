@@ -38,8 +38,8 @@ export interface CompilationResult {
 // Strip imports and extract component body from LLM-generated code
 // Safety layer in case LLM includes full ES6 syntax despite instructions
 // ─── Fix common AI syntax errors ───
-function fixCommonSyntaxErrors(code: string): string {
-    // Fix `const NAME NAME NAME = ...` → `const NAME_NAME_NAME = ...`
+export function fixCommonSyntaxErrors(code: string): string {
+  // Fix `const NAME NAME NAME = ...` → `const NAME_NAME_NAME = ...`
   // Handles any number of uppercase words: COLOR UNDERLINE, LOGO ENTER DURATION, etc.
   code = code.replace(
     /const\s+([A-Z][A-Z0-9]*(?:\s+[A-Z][A-Z0-9]*)+)\s*=/g,
@@ -55,6 +55,41 @@ function fixCommonSyntaxErrors(code: string): string {
     },
   );
 
+  // Fix interpolate calls missing clamp options
+  // interpolate(frame, [0, 60], [0, 1]) → interpolate(frame, [0, 60], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })
+  code = code.replace(
+    /interpolate\s*\(\s*([^,]+)\s*,\s*(\[[^\]]+\])\s*,\s*(\[[^\]]+\])\s*\)/g,
+    (match) => {
+      // Already has options (4th argument)
+      const afterMatch = code.slice(code.indexOf(match) + match.length).trimStart();
+      if (afterMatch.startsWith(",")) {
+        return match;
+      }
+      return `${match}, { extrapolateLeft: "clamp", extrapolateRight: "clamp" }`;
+    },
+  );
+
+  // Replace hardcoded [0, 60] with [0, SCENE_DURATION] when SCENE_DURATION is defined
+  // Check if SCENE_DURATION constant exists in the code
+  const hasSceneDuration = /const\s+SCENE_DURATION\s*=/.test(code);
+  if (hasSceneDuration) {
+    code = code.replace(
+      /interpolate\s*\(\s*([^,]+)\s*,\s*\[\s*0\s*,\s*60\s*\]/g,
+      "interpolate($1, [0, SCENE_DURATION]",
+    );
+  }
+
+  // Convert <img src="..."> to <Img src={staticFile("...")} />
+  // Handle both double and single quotes, and assets/ paths
+  // Also handle additional attributes like alt, className, etc.
+  code = code.replace(
+    /<img\s+src=(["'])\/?(assets\/[^"']+)\1[^>]*>/g,
+    '<Img src={staticFile("/$2")} />',
+  );
+  code = code.replace(
+    /<img\s+src=(["'])\/?([^"']+\.(?:jpeg|jpg|png|gif|webp|svg))\1[^>]*>/gi,
+    '<Img src={staticFile("/$2")} />',
+  );
 
   return code;
 }

@@ -7,6 +7,7 @@
 
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createAzure } from "@ai-sdk/azure";
 import { generateText, type LanguageModel } from "ai";
 
 export interface ModelEntry {
@@ -42,6 +43,7 @@ export function getModelChain(preferredModel?: string): ModelEntry[] {
       let provider = "openrouter";
       if (preferredModel.startsWith("claude-")) provider = "anthropic";
       else if (preferredModel.startsWith("qwen2.5-coder")) provider = "ollama";
+      else if (preferredModel.startsWith("gpt-") || preferredModel.startsWith("o1")) provider = "azure";
       entries.unshift({
         provider,
         model: preferredModel,
@@ -51,6 +53,27 @@ export function getModelChain(preferredModel?: string): ModelEntry[] {
   }
 
   return entries;
+}
+
+// Check if required env vars are present for a provider
+export function hasRequiredEnvVars(provider: string): boolean {
+  switch (provider) {
+    case "anthropic":
+      return !!process.env.ANTHROPIC_API_KEY;
+    case "ollama":
+      // Ollama doesn't strictly need API key, but needs base URL
+      return !!process.env.OLLAMA_BASE_URL;
+    case "openrouter":
+      return !!process.env.OPENROUTER_API_KEY;
+    case "azure":
+      return !!(process.env.AZURE_API_KEY && process.env.AZURE_BASE_URL && process.env.AZURE_DEPLOYMENT);
+    case "kie":
+      return !!process.env.KIE_API_KEY;
+    case "codecraft":
+      return !!(process.env.CODECRAFT_API_KEY || process.env.OPENAI_API_KEY);
+    default:
+      return false;
+  }
 }
 
 export function createModelForEntry(entry: ModelEntry): LanguageModel {
@@ -78,6 +101,16 @@ export function createModelForEntry(entry: ModelEntry): LanguageModel {
       baseURL: process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1",
     });
     return openai.chat(model);
+  }
+
+  if (provider === "azure") {
+    const azure = createAzure({
+      apiKey: process.env.AZURE_API_KEY,
+      baseURL: process.env.AZURE_BASE_URL,
+      resourceName: process.env.AZURE_DEPLOYMENT,
+      apiVersion: process.env.AZURE_API_VERSION || "2024-08-01-preview",
+    });
+    return azure(model);
   }
 
   if (provider === "kie") {
@@ -108,8 +141,16 @@ export async function selectWorkingModel(
   let attempts = 0;
 
   for (const entry of chain) {
+    // Skip providers with missing env vars before attempting
+    if (!hasRequiredEnvVars(entry.provider)) {
+      console.warn(`[Router] ⏭️  Skipping ${entry.fullName} — missing required env vars`);
+      continue;
+    }
+
     attempts++;
     console.log(`[Router] Trying ${entry.fullName} (attempt ${attempts})...`);
+
+    const startTime = Date.now();
 
     try {
       const model = createModelForEntry(entry);
@@ -125,11 +166,13 @@ export async function selectWorkingModel(
         ),
       ]);
 
-      console.log(`[Router] ✅ Selected ${entry.fullName}`);
+      const pingTimeMs = Date.now() - startTime;
+      console.log(`[Router] ✅ Selected ${entry.fullName} (ping: ${pingTimeMs}ms)`);
       return { model, entry, attempts };
     } catch (err) {
+      const pingTimeMs = Date.now() - startTime;
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[Router] ❌ ${entry.fullName} failed: ${msg}`);
+      console.warn(`[Router] ❌ ${entry.fullName} failed after ${pingTimeMs}ms: ${msg}`);
       continue;
     }
   }

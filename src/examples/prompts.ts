@@ -1,4 +1,13 @@
+import { hemmamiPromoPrompt } from "./hemmami-promo-prompt";
+
 export const examplePrompts = [
+  {
+    id: "hemmami-promo",
+    headline: "Hemmami Plast promo",
+    icon: "BarChart3",
+    prompt: hemmamiPromoPrompt,
+    color: "#a4d233",
+  },
   {
     id: "text-typewriter",
     headline: "Typewriter text",

@@ -196,10 +196,10 @@ PREFERRED (safe):
 ## IMAGES AND ASSETS (CRITICAL)
 
 The following images are available in the public/assets/ folder:
-- /assets/logo-hp.jpeg          → HEMMAMI PLAST logo (blue circle with HP)
-- /assets/catalog-1.jpeg        → Product catalog page 1
-- /assets/catalog-2.jpeg        → Product catalog page 2
-- /assets/product-showcase.jpeg → Green water tanks product photo
+- /assets/logo-hp.jpeg          → round blue T/P logo (white TP monogram with green T stem, blue radial gradient, black ® badge at top-right) — circular, 640x640
+- /assets/catalog-1.jpeg        → HEMMAMI PLAST tank catalogue page (ARWA 200L-2000L, BIBOU + HORIZONTAL 500L-1000L, ASSIL 300L-1000L) — 1600x1212
+- /assets/catalog-2.jpeg        → brochure cover with tanks collage + contacts (HEMMAMI PLAST cover) — 1600x1212
+- /assets/product-showcase.jpeg → TAYEB PLAST PVC technical sheet with HDPE pipe coil photo (not tanks) — contains GAMME DE PRODUCTION table (diameters 40-400, Pn6/Pn10/Pn16), 1600x1212
 
 To use any image, you MUST use staticFile() + Img from remotion:
 
@@ -229,7 +229,7 @@ Example:
 <Img src={staticFile("/assets/catalog-1.jpeg")}
   style={{
     width: "100%", height: "100%", objectFit: "cover",
-    transform: "scale(" + interpolate(frame, [0, 60], [1.0, 1.15], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) + ") translateX(" + interpolate(frame, [0, 60], [-3, 3]) + "%)"
+    transform: "scale(" + interpolate(frame, [0, SCENE_DURATION], [1.0, 1.15], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) + ") translateX(" + interpolate(frame, [0, SCENE_DURATION], [-3, 3]) + "%)"
   }}
 />
 
@@ -289,7 +289,7 @@ Available timing functions (all pre-imported):
 RULES:
 1. timing prop ALWAYS takes a function call (linearTiming(...) or springTiming(...))
 2. NEVER pass a plain object like { durationInFrames: 15 }
-3. Total of all Transition durations + all Sequence durations = video durationInFrames
+3. video durationInFrames = sum of all Sequence durations MINUS sum of all Transition durations (transitions overlap the scenes)
 4. Transition duration should be 10-30 frames typically
 
 ## STYLING RULES
@@ -304,6 +304,44 @@ RULES:
 - Output ONLY code - no explanations, no questions
 - Response must start with "import" and end with "};"
 - If prompt is ambiguous, make a reasonable choice - do not ask for clarification
+
+## COMMON MISTAKES TO AVOID (CRITICAL)
+
+1. ❌ Using <img> instead of <Img> + staticFile()
+   ✅ <Img src={staticFile("/assets/logo-hp.jpeg")} />
+
+2. ❌ interpolate without clamp options
+   ❌ interpolate(frame, [0, 60], [0, 1])
+   ✅ interpolate(frame, [0, SCENE_DURATION], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })
+
+3. ❌ Hardcoded [0, 60] instead of SCENE_DURATION
+   ❌ interpolate(frame, [0, 60], ...)
+   ✅ const SCENE_DURATION = 150; interpolate(frame, [0, SCENE_DURATION], ...)
+
+4. ❌ Placeholder JSX like {...} or "scene here"
+   ❌ <Sequence>{/* scene 1 */}</Sequence>
+   ✅ <Sequence durationInFrames={SCENE_DURATION}><AbsoluteFill>real content</AbsoluteFill></Sequence>
+
+5. ❌ Unused imports (spring, useVideoConfig, etc. imported but not used)
+   ✅ Only import what you use; the compiler will prune unused ones
+
+## SELF-CHECK BEFORE OUTPUT (CRITICAL)
+
+Before returning code, verify ALL of the following:
+
+☐ Code starts with "import" and ends with "};"
+☐ Exactly ONE top-level export const ComponentName = () => { ... };
+☐ staticFile imported if any image used?
+☐ Img imported if any image used?
+☐ Every interpolate has { extrapolateLeft: "clamp", extrapolateRight: "clamp" }?
+☐ Ken Burns uses SCENE_DURATION, not hardcoded 60?
+☐ No <img> tags — all images use <Img src={staticFile(...)} />?
+☐ No placeholders ("...", "scene here", comments in JSX)?
+☐ Arabic text uses fontFamily: "Cairo, sans-serif" + direction: "rtl"?
+☐ No unused imports (spring, useVideoConfig, interpolate, etc.)?
+☐ All constants UPPER_SNAKE_CASE defined INSIDE component after hooks?
+☐ Reserved names (spring, interpolate, useCurrentFrame, useVideoConfig, AbsoluteFill, Sequence) NOT used as variables?
+☐ TransitionSeries timing uses linearTiming(...) or springTiming(...) function calls?
 
 `;
 

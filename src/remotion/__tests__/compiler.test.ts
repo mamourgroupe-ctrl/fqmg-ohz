@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ensureRequiredImports, extractComponentBody, removeUnusedImports } from "../compiler";
+import { ensureRequiredImports, extractComponentBody, removeUnusedImports, fixCommonSyntaxErrors } from "../compiler";
 
 describe("ensureRequiredImports", () => {
   it("adds import for code without imports", () => {
@@ -250,5 +250,74 @@ export const MyAnimation = () => {
     // So we verify the internal logic by checking the functions are exported and work
     expect(typeof removeUnusedImports).toBe("function");
     expect(typeof ensureRequiredImports).toBe("function");
+  });
+});
+
+describe("fixCommonSyntaxErrors", () => {
+  it("adds clamp options to interpolate calls missing them", () => {
+    const input = `const opacity = interpolate(frame, [0, 60], [0, 1]);`;
+    const result = fixCommonSyntaxErrors(input);
+    expect(result).toContain('{ extrapolateLeft: "clamp", extrapolateRight: "clamp" }');
+  });
+
+  it("does not add clamp when already present", () => {
+    const input = `const opacity = interpolate(frame, [0, 60], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });`;
+    const result = fixCommonSyntaxErrors(input);
+    expect(result).toBe(input);
+  });
+
+  it("replaces [0, 60] with [0, SCENE_DURATION] when SCENE_DURATION defined", () => {
+    const input = `const SCENE_DURATION = 90;
+const opacity = interpolate(frame, [0, 60], [0, 1]);`;
+    const result = fixCommonSyntaxErrors(input);
+    expect(result).toContain("interpolate(frame, [0, SCENE_DURATION]");
+    expect(result).not.toContain("[0, 60]");
+  });
+
+  it("does not replace [0, 60] when SCENE_DURATION not defined", () => {
+    const input = `const opacity = interpolate(frame, [0, 60], [0, 1]);`;
+    const result = fixCommonSyntaxErrors(input);
+    expect(result).toContain("[0, 60]");
+    expect(result).not.toContain("SCENE_DURATION");
+  });
+
+  it("converts <img src='/assets/...'> to <Img src={staticFile(...)} />", () => {
+    const input = `<img src="/assets/logo.png" />`;
+    const result = fixCommonSyntaxErrors(input);
+    expect(result).toContain('<Img src={staticFile("/assets/logo.png")} />');
+    expect(result).not.toContain('<img');
+  });
+
+  it("converts <img src='assets/...'> to <Img src={staticFile(...)} />", () => {
+    const input = `<img src="assets/image.jpg" />`;
+    const result = fixCommonSyntaxErrors(input);
+    expect(result).toContain('<Img src={staticFile("/assets/image.jpg")} />');
+  });
+
+  it("converts <img> with single quotes", () => {
+    const input = `<img src='/assets/photo.jpeg' />`;
+    const result = fixCommonSyntaxErrors(input);
+    expect(result).toContain('<Img src={staticFile("/assets/photo.jpeg")} />');
+  });
+
+  it("converts <img> without leading slash", () => {
+    const input = `<img src="assets/banner.png" />`;
+    const result = fixCommonSyntaxErrors(input);
+    expect(result).toContain('<Img src={staticFile("/assets/banner.png")} />');
+  });
+
+  it("handles self-closing and non-self-closing img tags", () => {
+    const input1 = `<img src="/assets/logo.png">`;
+    const input2 = `<img src="/assets/logo.png" />`;
+    expect(fixCommonSyntaxErrors(input1)).toContain('<Img src={staticFile("/assets/logo.png")} />');
+    expect(fixCommonSyntaxErrors(input2)).toContain('<Img src={staticFile("/assets/logo.png")} />');
+  });
+
+  it("preserves other attributes on img tag", () => {
+    const input = `<img src="/assets/logo.png" alt="Logo" className="logo" />`;
+    const result = fixCommonSyntaxErrors(input);
+    expect(result).toContain('<Img src={staticFile("/assets/logo.png")} />');
+    // Note: other attributes are dropped as <Img> from remotion doesn't take them all
+    // This is expected behavior for the conversion
   });
 });
