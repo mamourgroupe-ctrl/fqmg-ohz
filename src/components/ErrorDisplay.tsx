@@ -114,4 +114,4 @@ export const ErrorDisplay: React.FC<ErrorDisplayProps> = ({
 };
 
 // ErrorType is still used by AnimationPlayer for its interface
-export type ErrorType = "compilation" | "api" | "validation";
+export type ErrorType = "compilation" | "api" | "validation" | "truncated";

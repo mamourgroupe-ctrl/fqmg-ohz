@@ -6,6 +6,7 @@ import {
 import {
   getGenerationHttpErrorMessage,
   getGenerationStreamErrorMessage,
+  isTruncatedGenerationEvent,
   parseGenerationStreamEvent,
 } from "@/helpers/generation-errors";
 import type {
@@ -71,6 +72,8 @@ interface UseGenerationApiReturn {
   ) => Promise<void>;
 }
 
+const MAX_TRUNCATION_FALLBACKS = 2;
+
 export function useGenerationApi(): UseGenerationApiReturn {
   const [isLoading, setIsLoading] = useState(false);
 
@@ -115,22 +118,27 @@ export function useGenerationApi(): UseGenerationApiReturn {
         onMessageSent?.(prompt, frameImages);
       }
 
+      const excludedModels: string[] = [];
+      let truncationFallbacks = 0;
+
       try {
-        const response = await fetch("/api/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            prompt,
-            model,
-            currentCode: isFollowUp ? currentCode : undefined,
-            conversationHistory: isFollowUp ? conversationHistory : [],
-            previouslyUsedSkills: isFollowUp ? previouslyUsedSkills : [],
-            isFollowUp,
-            hasManualEdits,
-            errorCorrection,
-            frameImages,
-          }),
-        });
+        while (true) {
+          const response = await fetch("/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              prompt,
+              model,
+              currentCode: isFollowUp ? currentCode : undefined,
+              conversationHistory: isFollowUp ? conversationHistory : [],
+              previouslyUsedSkills: isFollowUp ? previouslyUsedSkills : [],
+              isFollowUp,
+              hasManualEdits,
+              errorCorrection,
+              frameImages,
+              excludedModels,
+            }),
+          });
 
         if (!response.ok) {
           const errorData: unknown = await response.json().catch(() => null);
@@ -153,6 +161,16 @@ export function useGenerationApi(): UseGenerationApiReturn {
           if (errorFields.type === "validation") {
             onError?.(errorMessage, "validation");
             onErrorMessage?.(errorMessage, "validation");
+            return;
+          }
+          if (
+            excludedModels.length > 0 &&
+            errorFields.type === "provider_unavailable"
+          ) {
+            onError?.(
+              `Generation output was truncated, and fallback model selection failed: ${errorMessage}`,
+              "truncated",
+            );
             return;
           }
           throw new Error(errorMessage);
@@ -181,6 +199,58 @@ export function useGenerationApi(): UseGenerationApiReturn {
         let accumulatedText = "";
         let buffer = "";
         let streamMetadata: AssistantMetadata = {};
+        let finishReason: string | undefined;
+        let receivedFinishEvent = false;
+
+        const processLine = (line: string): void => {
+          if (!line.startsWith("data: ")) return;
+          const data = line.slice(6);
+          try {
+            const event = parseGenerationStreamEvent(data);
+            if (!event) return;
+            if (event.type === "metadata") {
+              const skills = Array.isArray(event.skills)
+                ? event.skills.filter(
+                    (skill): skill is string => typeof skill === "string",
+                  )
+                : undefined;
+              streamMetadata = {
+                ...streamMetadata,
+                skills,
+              };
+              onPendingMessage?.(skills);
+            } else if (event.type === "reasoning-start") {
+              onStreamPhaseChange?.("reasoning");
+            } else if (event.type === "text-start") {
+              onStreamPhaseChange?.("generating");
+            } else if (event.type === "text-delta") {
+              if (typeof event.delta !== "string") {
+                throw new TypeError("The generation stream returned invalid text.");
+              }
+              accumulatedText += event.delta;
+              const codeToShow = stripMarkdownFences(accumulatedText);
+              onCodeGenerated?.(codeToShow);
+            } else if (event.type === "finish") {
+              receivedFinishEvent = true;
+              finishReason = isTruncatedGenerationEvent(event)
+                ? "length"
+                : typeof event.finishReason === "string"
+                  ? event.finishReason
+                  : undefined;
+            } else if (event.type === "error") {
+              const errorMessage = getGenerationStreamErrorMessage(
+                event.errorText ?? event.error,
+              );
+              console.error("STREAM ERROR:", errorMessage);
+              throw new Error(errorMessage);
+            }
+          } catch (parseError) {
+            if (parseError instanceof SyntaxError) {
+              throw new Error("The generation stream returned invalid data.");
+            }
+            throw parseError;
+          }
+        };
 
         while (true) {
           const { done, value } = await reader.read();
@@ -189,65 +259,46 @@ export function useGenerationApi(): UseGenerationApiReturn {
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
+          lines.forEach(processLine);
+        }
+        buffer += decoder.decode();
+        if (buffer) processLine(buffer);
 
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            const data = line.slice(6);
-
-            try {
-              const event = parseGenerationStreamEvent(data);
-              if (!event) continue;
-              if (event.type === "metadata") {
-                const skills = Array.isArray(event.skills)
-                  ? event.skills.filter(
-                      (skill): skill is string => typeof skill === "string",
-                    )
-                  : undefined;
-                streamMetadata = {
-                  ...streamMetadata,
-                  skills,
-                };
-                onPendingMessage?.(skills);
-              } else if (event.type === "reasoning-start") {
-                onStreamPhaseChange?.("reasoning");
-              } else if (event.type === "text-start") {
-                onStreamPhaseChange?.("generating");
-              } else if (event.type === "text-delta") {
-                if (typeof event.delta !== "string") {
-                  throw new TypeError("The generation stream returned invalid text.");
-                }
-                accumulatedText += event.delta;
-                const codeToShow = stripMarkdownFences(accumulatedText);
-                onCodeGenerated?.(codeToShow);
-              } else if (event.type === "error") {
-                const errorMessage = getGenerationStreamErrorMessage(
-                  event.errorText ?? event.error,
-                );
-                console.error("STREAM ERROR:", errorMessage);
-                throw new Error(errorMessage);
-              }
-            } catch (parseError) {
-              if (parseError instanceof SyntaxError) {
-                throw new Error("The generation stream returned invalid data.");
-              }
-              throw parseError;
-            }
+        if (finishReason === "length" || !receivedFinishEvent) {
+          const failedModel = response.headers.get("x-generation-model");
+          if (
+            failedModel &&
+            !excludedModels.includes(failedModel) &&
+            truncationFallbacks < MAX_TRUNCATION_FALLBACKS
+          ) {
+            excludedModels.push(failedModel);
+            truncationFallbacks++;
+            onStreamPhaseChange?.("reasoning");
+            continue;
           }
+
+          onError?.(
+            "Generation output was truncated because the selected models reached their output limit or ended without a completion signal. Try a shorter prompt or choose a model with a larger output limit.",
+            "truncated",
+          );
+          return;
         }
 
-        let finalCode = stripMarkdownFences(accumulatedText);
-        finalCode = extractComponentCode(finalCode);
-        onCodeGenerated?.(finalCode);
-        onClearPendingMessage?.();
-        onGenerationComplete?.(
-          finalCode,
-          undefined,
-          streamMetadata.skills?.length ? streamMetadata : undefined,
-        );
+          let finalCode = stripMarkdownFences(accumulatedText);
+          finalCode = extractComponentCode(finalCode);
+          onCodeGenerated?.(finalCode);
+          onClearPendingMessage?.();
+          onGenerationComplete?.(
+            finalCode,
+            undefined,
+            streamMetadata.skills?.length ? streamMetadata : undefined,
+          );
 
-        const validation = validateGptResponse(finalCode);
-        if (!validation.isValid && validation.error) {
-          onError?.(validation.error, "validation");
+          const validation = validateGptResponse(finalCode);
+          if (!validation.isValid && validation.error) {
+            onError?.(validation.error, "validation");
+          }
+          break;
         }
       } catch (error) {
         console.error("Error generating code:", error);

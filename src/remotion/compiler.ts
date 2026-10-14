@@ -35,10 +35,514 @@ export interface CompilationResult {
   error: string | null;
 }
 
+interface SourceEdit {
+  start: number;
+  end: number;
+  text: string;
+}
+
+type BabelNodeLike = Record<string, unknown> & {
+  type?: string;
+  start?: number;
+  end?: number;
+};
+
+function parseGeneratedCode(code: string): unknown {
+  try {
+    return Babel.packages.parser.parse(code, {
+      sourceType: "module",
+      plugins: ["jsx", "typescript"],
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function getMissingRemotionHookBindings(code: string): string[] {
+  const ast = parseGeneratedCode(
+    `const DynamicAnimation = () => {\n${code}\n};`,
+  ) as BabelNodeLike | undefined;
+  if (!ast) return [];
+
+  const bindings = new Set<string>();
+  const references = new Set<string>();
+  const bindingNodes = new WeakSet<object>();
+
+  const markBindingPattern = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(markBindingPattern);
+      return;
+    }
+    if (value === null || typeof value !== "object") return;
+    const node = value as BabelNodeLike;
+    if (node.type === "Identifier") {
+      bindingNodes.add(node);
+      if (typeof node.name === "string") bindings.add(node.name);
+      return;
+    }
+    if (node.type === "ObjectPattern") {
+      const properties = node.properties;
+      if (Array.isArray(properties)) {
+        for (const property of properties) {
+          const propertyNode = property as BabelNodeLike;
+          markBindingPattern(
+            propertyNode.type === "RestElement"
+              ? propertyNode.argument
+              : propertyNode.value,
+          );
+        }
+      }
+    } else if (node.type === "ArrayPattern") {
+      if (Array.isArray(node.elements)) {
+        node.elements.forEach(markBindingPattern);
+      }
+    } else if (node.type === "RestElement") {
+      markBindingPattern(node.argument);
+    } else if (node.type === "AssignmentPattern") {
+      markBindingPattern(node.left);
+    } else if (node.type === "TSParameterProperty") {
+      markBindingPattern(node.parameter);
+    }
+  };
+
+  const visit = (
+    value: unknown,
+    parent?: BabelNodeLike,
+    parentKey?: string,
+  ): void => {
+    if (Array.isArray(value)) {
+      value.forEach((child) => visit(child, parent, parentKey));
+      return;
+    }
+    if (value === null || typeof value !== "object") return;
+    const node = value as BabelNodeLike;
+
+    if (node.type === "VariableDeclarator") {
+      markBindingPattern(node.id);
+    } else if (
+      node.type === "FunctionDeclaration" ||
+      node.type === "FunctionExpression" ||
+      node.type === "ArrowFunctionExpression" ||
+      node.type === "ObjectMethod" ||
+      node.type === "ClassMethod" ||
+      node.type === "ClassPrivateMethod" ||
+      node.type === "ClassDeclaration" ||
+      node.type === "ClassExpression"
+    ) {
+      if (node.id) markBindingPattern(node.id);
+      markBindingPattern(node.params);
+    } else if (node.type === "CatchClause") {
+      markBindingPattern(node.param);
+    } else if (
+      node.type === "ImportSpecifier" ||
+      node.type === "ImportDefaultSpecifier" ||
+      node.type === "ImportNamespaceSpecifier"
+    ) {
+      markBindingPattern(node.local);
+    }
+
+    if (node.type === "Identifier" && !bindingNodes.has(node)) {
+      const isNonComputedProperty =
+        ((parent?.type === "MemberExpression" ||
+          parent?.type === "OptionalMemberExpression") &&
+          parentKey === "property" &&
+          parent.computed !== true) ||
+        ((parent?.type === "ObjectProperty" ||
+          parent?.type === "ObjectMethod") &&
+          parentKey === "key" &&
+          parent.computed !== true &&
+          parent.shorthand !== true) ||
+        (parent?.type === "LabeledStatement" && parentKey === "label") ||
+        ((parent?.type === "BreakStatement" ||
+          parent?.type === "ContinueStatement") &&
+          parentKey === "label");
+      if (!isNonComputedProperty && typeof node.name === "string") {
+        references.add(node.name);
+      }
+    }
+
+    for (const [key, child] of Object.entries(node)) {
+      visit(child, node, key);
+    }
+  };
+
+  visit(ast);
+  return ["frame", "fps", "durationInFrames"].filter(
+    (name) => references.has(name) && !bindings.has(name),
+  );
+}
+
+function addMissingRemotionHookBindings(code: string): string {
+  const missingBindings = getMissingRemotionHookBindings(code);
+  if (missingBindings.length === 0) return code;
+
+  const hookDeclarations: string[] = [];
+  if (missingBindings.includes("frame")) {
+    hookDeclarations.push("const frame = useCurrentFrame();");
+  }
+  const videoConfigBindings = missingBindings.filter(
+    (name) => name === "fps" || name === "durationInFrames",
+  );
+  if (videoConfigBindings.length > 0) {
+    hookDeclarations.push(
+      `const { ${videoConfigBindings.join(", ")} } = useVideoConfig();`,
+    );
+  }
+  return `${hookDeclarations.join("\n")}\n${code}`;
+}
+
+function skipQuotedText(code: string, start: number): number {
+  const quote = code[start];
+  for (let index = start + 1; index < code.length; index++) {
+    if (code[index] === "\\") {
+      index++;
+    } else if (code[index] === quote) {
+      return index + 1;
+    }
+  }
+  return code.length;
+}
+
+function skipTrivia(code: string, start: number): number {
+  let index = start;
+  while (index < code.length) {
+    if (/\s/.test(code[index])) {
+      index++;
+    } else if (code.startsWith("//", index)) {
+      const lineEnd = code.indexOf("\n", index + 2);
+      index = lineEnd === -1 ? code.length : lineEnd + 1;
+    } else if (code.startsWith("/*", index)) {
+      const commentEnd = code.indexOf("*/", index + 2);
+      index = commentEnd === -1 ? code.length : commentEnd + 2;
+    } else {
+      break;
+    }
+  }
+  return index;
+}
+
+function findClosingDelimiter(
+  code: string,
+  start: number,
+  opening: string,
+  closing: string,
+): number | undefined {
+  let depth = 0;
+  for (let index = start; index < code.length; index++) {
+    const char = code[index];
+    if (char === "'" || char === '"' || char === "`") {
+      index = skipQuotedText(code, index) - 1;
+      continue;
+    }
+    if (code.startsWith("//", index)) {
+      const lineEnd = code.indexOf("\n", index + 2);
+      index = lineEnd === -1 ? code.length : lineEnd;
+      continue;
+    }
+    if (code.startsWith("/*", index)) {
+      const commentEnd = code.indexOf("*/", index + 2);
+      index = commentEnd === -1 ? code.length : commentEnd + 1;
+      continue;
+    }
+    if (char === opening) {
+      depth++;
+    } else if (char === closing) {
+      depth--;
+      if (depth === 0) return index;
+    }
+  }
+  return undefined;
+}
+
+function isClampOptionsObject(source: string): boolean {
+  try {
+    const ast = parseGeneratedCode(`const options = (${source});`) as
+      | BabelNodeLike
+      | undefined;
+    if (!ast) return false;
+    const program = ast.program as BabelNodeLike | undefined;
+    const statement = (program?.body as BabelNodeLike[] | undefined)?.[0];
+    const declaration = (
+      statement?.declarations as BabelNodeLike[] | undefined
+    )?.[0];
+    const object = declaration?.init as BabelNodeLike | undefined;
+    if (object?.type !== "ObjectExpression") return false;
+
+    const properties = object.properties as BabelNodeLike[] | undefined;
+    const clampProperties = new Set<string>();
+    for (const property of properties ?? []) {
+      if (property.type !== "ObjectProperty") continue;
+      const key = property.key as BabelNodeLike | undefined;
+      const value = property.value as BabelNodeLike | undefined;
+      if (
+        (key?.name === "extrapolateLeft" ||
+          key?.name === "extrapolateRight") &&
+        value?.type === "StringLiteral" &&
+        value.value === "clamp"
+      ) {
+        clampProperties.add(key.name);
+      }
+    }
+    return (
+      clampProperties.has("extrapolateLeft") &&
+      clampProperties.has("extrapolateRight")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function applySourceEdits(code: string, edits: SourceEdit[]): string {
+  return edits
+    .sort((left, right) => right.start - left.start)
+    .reduce(
+      (updated, edit) =>
+        updated.slice(0, edit.start) + edit.text + updated.slice(edit.end),
+      code,
+    );
+}
+
+function maskNonCodeText(code: string): string {
+    const chars = code.split("");
+    for (let index = 0; index < code.length; index++) {
+      const char = code[index];
+      if (char === "'" || char === '"' || char === "`") {
+        const end = skipQuotedText(code, index);
+        for (let masked = index; masked < end; masked++) {
+          if (chars[masked] !== "\n" && chars[masked] !== "\r") chars[masked] = " ";
+        }
+        index = end - 1;
+      } else if (code.startsWith("//", index)) {
+        const lineEnd = code.indexOf("\n", index + 2);
+        const end = lineEnd === -1 ? code.length : lineEnd;
+        for (let masked = index; masked < end; masked++) chars[masked] = " ";
+        index = end - 1;
+      } else if (code.startsWith("/*", index)) {
+        const commentEnd = code.indexOf("*/", index + 2);
+        const end = commentEnd === -1 ? code.length : commentEnd + 2;
+        for (let masked = index; masked < end; masked++) {
+          if (chars[masked] !== "\n" && chars[masked] !== "\r") chars[masked] = " ";
+        }
+        index = end - 1;
+      }
+    }
+    return chars.join("");
+}
+
+function repairSplitCamelCaseIdentifiers(code: string): string {
+    const maskedCode = maskNonCodeText(code);
+    const declarationPattern =
+      /\b(?:const|let|var)\s+([a-z_$][\w$]*(?:\s+[A-Z][\w$]*)+)\s*=/g;
+    const candidates = new Set<string>();
+
+    for (const match of maskedCode.matchAll(declarationPattern)) {
+      candidates.add((match[1] ?? "").trim().split(/\s+/).join(" "));
+    }
+
+    const edits: SourceEdit[] = [];
+    for (const candidate of [...candidates].sort(
+      (left, right) => right.length - left.length,
+    )) {
+      const words = candidate.split(" ");
+      const splitIdentifierPattern = words
+        .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .join("\\s+");
+      const occurrencePattern = new RegExp(
+        `(^|[^\\w$])(${splitIdentifierPattern})(?=$|[^\\w$])`,
+        "g",
+      );
+
+      for (const match of maskedCode.matchAll(occurrencePattern)) {
+        const prefixLength = match[1]?.length ?? 0;
+        const start = (match.index ?? 0) + prefixLength;
+        const end = start + (match[2]?.length ?? 0);
+        if (!edits.some((edit) => start < edit.end && end > edit.start)) {
+          edits.push({ start, end, text: words.join("") });
+        }
+      }
+    }
+
+    return applySourceEdits(code, edits);
+}
+
+function repairMisplacedClampOptions(code: string): string {
+  const edits: SourceEdit[] = [];
+  for (let index = 0; index < code.length; index++) {
+    const char = code[index];
+    if (char === "'" || char === '"' || char === "`") {
+      index = skipQuotedText(code, index) - 1;
+      continue;
+    }
+    if (code.startsWith("//", index)) {
+      const lineEnd = code.indexOf("\n", index + 2);
+      index = lineEnd === -1 ? code.length : lineEnd;
+      continue;
+    }
+    if (code.startsWith("/*", index)) {
+      const commentEnd = code.indexOf("*/", index + 2);
+      index = commentEnd === -1 ? code.length : commentEnd + 1;
+      continue;
+    }
+    if (
+      code.slice(index, index + "interpolate".length) !== "interpolate" ||
+      /[\w$]/.test(code[index - 1] ?? "")
+    ) {
+      continue;
+    }
+
+    const afterName = index + "interpolate".length;
+    if (/[\w$]/.test(code[afterName] ?? "")) continue;
+    const openParen = skipTrivia(code, afterName);
+    if (code[openParen] !== "(") continue;
+    const closeParen = findClosingDelimiter(code, openParen, "(", ")");
+    if (closeParen === undefined) continue;
+
+    const comma = skipTrivia(code, closeParen + 1);
+    if (code[comma] !== ",") continue;
+    const optionsStart = skipTrivia(code, comma + 1);
+    if (code[optionsStart] !== "{") continue;
+    const optionsEnd = findClosingDelimiter(code, optionsStart, "{", "}");
+    if (optionsEnd === undefined) continue;
+    const options = code.slice(optionsStart, optionsEnd + 1);
+    if (!isClampOptionsObject(options)) continue;
+
+    const callPrefix = "const __interpolateCall = ";
+    const callAst = parseGeneratedCode(
+      `${callPrefix}${code.slice(index, closeParen + 1)};`,
+    ) as BabelNodeLike | undefined;
+    const callProgram = callAst?.program as BabelNodeLike | undefined;
+    const callStatement = (callProgram?.body as BabelNodeLike[] | undefined)?.[0];
+    const callDeclaration = (
+      callStatement?.declarations as BabelNodeLike[] | undefined
+    )?.[0];
+    const call = callDeclaration?.init as BabelNodeLike | undefined;
+    const args = call?.arguments as BabelNodeLike[] | undefined;
+    const lastArgument = args?.[2];
+    if (
+      call?.type !== "CallExpression" ||
+      args?.length !== 3 ||
+      typeof lastArgument?.end !== "number"
+    ) {
+      continue;
+    }
+
+    edits.push({
+      start: index + lastArgument.end - callPrefix.length,
+      end: index + lastArgument.end - callPrefix.length,
+      text: `,${code.slice(comma + 1, optionsStart)}${options}`,
+    });
+    edits.push({
+      start: comma,
+      end: optionsEnd + 1,
+      text: "",
+    });
+    index = optionsEnd;
+  }
+  return applySourceEdits(code, edits);
+}
+
+function fixInterpolateCalls(code: string): string {
+  let ast = parseGeneratedCode(code) as BabelNodeLike | undefined;
+  if (!ast) {
+    code = repairMisplacedClampOptions(code);
+    ast = parseGeneratedCode(code) as BabelNodeLike | undefined;
+  }
+  if (!ast) return code;
+
+  let hasSceneDuration = false;
+  const nodes: BabelNodeLike[] = [];
+  const visited = new WeakSet<object>();
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (value === null || typeof value !== "object" || visited.has(value)) {
+      return;
+    }
+    visited.add(value);
+    const node = value as BabelNodeLike;
+    if (typeof node.type !== "string") return;
+    nodes.push(node);
+    if (node.type === "VariableDeclarator") {
+      const identifier = node.id as BabelNodeLike | undefined;
+      if (
+        identifier?.type === "Identifier" &&
+        identifier.name === "SCENE_DURATION"
+      ) {
+        hasSceneDuration = true;
+      }
+    }
+    for (const child of Object.values(node)) visit(child);
+  };
+  visit(ast);
+
+  const edits: SourceEdit[] = [];
+  for (const node of nodes) {
+    if (node.type !== "CallExpression") continue;
+    const callee = node.callee as BabelNodeLike | undefined;
+    const member =
+      callee?.type === "MemberExpression"
+        ? (callee.property as BabelNodeLike | undefined)
+        : undefined;
+    if (
+      callee?.name !== "interpolate" &&
+      !(member?.type === "Identifier" && member.name === "interpolate")
+    ) {
+      continue;
+    }
+    const args = node.arguments as BabelNodeLike[] | undefined;
+    if (args?.length !== 3) continue;
+
+    const inputRange = args[1];
+    if (
+      hasSceneDuration &&
+      inputRange?.type === "ArrayExpression" &&
+      Array.isArray(inputRange.elements) &&
+      inputRange.elements.length === 2
+    ) {
+      const elements = inputRange.elements as BabelNodeLike[];
+      const rangeText =
+        typeof inputRange.start === "number" &&
+        typeof inputRange.end === "number"
+          ? code.slice(inputRange.start, inputRange.end)
+          : "";
+      if (
+        elements[0]?.type === "NumericLiteral" &&
+        elements[0].value === 0 &&
+        elements[1]?.type === "NumericLiteral" &&
+        elements[1].value === 60 &&
+        /^\[\s*0\s*,\s*60\s*\]$/.test(rangeText) &&
+        typeof inputRange.start === "number" &&
+        typeof inputRange.end === "number"
+      ) {
+        edits.push({
+          start: inputRange.start,
+          end: inputRange.end,
+          text: "[0, SCENE_DURATION]",
+        });
+      }
+    }
+
+    const lastArgument = args[2];
+    if (typeof lastArgument?.end === "number") {
+      edits.push({
+        start: lastArgument.end,
+        end: lastArgument.end,
+        text: ', { extrapolateLeft: "clamp", extrapolateRight: "clamp" }',
+      });
+    }
+  }
+
+  return applySourceEdits(code, edits);
+}
+
 // Strip imports and extract component body from LLM-generated code
 // Safety layer in case LLM includes full ES6 syntax despite instructions
 // ─── Fix common AI syntax errors ───
 export function fixCommonSyntaxErrors(code: string): string {
+  code = repairSplitCamelCaseIdentifiers(code);
+
   // Close destructured callback parameters when generated arrow functions omit `)`.
   code = code.replace(/\(\s*\{\s*transition\s*\}\s*=>/g, "({ transition }) =>");
   code = code.replace(/\bdurationIn\s+Frames\b/g, "durationInFrames");
@@ -59,35 +563,6 @@ export function fixCommonSyntaxErrors(code: string): string {
     },
   );
 
-  // Move misplaced interpolate options back inside the call.
-  code = code.replace(
-    /(interpolate\s*\(\s*([^,]+)\s*,\s*(\[[^\]]+\])\s*,\s*(\[[^\]]+\])\s*\))\s*,\s*(\{\s*extrapolateLeft\s*:\s*["']clamp["']\s*,\s*extrapolateRight\s*:\s*["']clamp["']\s*\})/g,
-    (match, call) => {
-      const options = match.slice(call.length).replace(/^\s*,\s*/, "");
-      return `${call.slice(0, -1)}, ${options})`;
-    },
-  );
-
-  // Fix interpolate calls missing clamp options
-  // interpolate(frame, [0, 60], [0, 1]) → interpolate(frame, [0, 60], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })
-  code = code.replace(
-    /interpolate\s*\(\s*([^,]+)\s*,\s*(\[[^\]]+\])\s*,\s*(\[[^\]]+\])\s*\)/g,
-    (match) => {
-      const callWithoutClosingParen = match.replace(/\s*\)$/, "");
-      return `${callWithoutClosingParen}, { extrapolateLeft: "clamp", extrapolateRight: "clamp" })`;
-    },
-  );
-
-  // Replace hardcoded [0, 60] with [0, SCENE_DURATION] when SCENE_DURATION is defined
-  // Check if SCENE_DURATION constant exists in the code
-  const hasSceneDuration = /const\s+SCENE_DURATION\s*=/.test(code);
-  if (hasSceneDuration) {
-    code = code.replace(
-      /interpolate\s*\(\s*([^,]+)\s*,\s*\[\s*0\s*,\s*60\s*\]/g,
-      "interpolate($1, [0, SCENE_DURATION]",
-    );
-  }
-
   // Convert <img src="..."> to <Img src={staticFile("...")} />
   // Handle both double and single quotes, and assets/ paths
   // Also handle additional attributes like alt, className, etc.
@@ -100,7 +575,7 @@ export function fixCommonSyntaxErrors(code: string): string {
     '<Img src={staticFile("/$2")} />',
   );
 
-  return code;
+  return fixInterpolateCalls(code);
 }
 
 // ─── Ensure required Remotion imports are present ───
@@ -381,9 +856,9 @@ export function extractComponentBody(code: string): string {
     // Clean any remaining export keywords
     const cleanedHelpers = helpers.replace(/^\s*export\s+/gm, "");
     const cleanedBody = body.replace(/^\s*export\s+/gm, "");
-    return cleanedHelpers
+    return addMissingRemotionHookBindings(cleanedHelpers
       ? `${cleanedHelpers}\n\n${cleanedBody}`
-      : cleanedBody;
+      : cleanedBody);
   }
 
   // Step 4: Fallback - const X = () => {...}
@@ -391,11 +866,13 @@ export function extractComponentBody(code: string): string {
   if (fallbackMatch) {
     const helpers = fallbackMatch[1].trim();
     const body = fallbackMatch[2].trim();
-    return helpers ? `${helpers}\n\n${body}` : body;
+    return addMissingRemotionHookBindings(helpers ? `${helpers}\n\n${body}` : body);
   }
 
   // Step 5: Last resort
-  return cleaned.replace(/^\s*export\s+/gm, "");
+  return addMissingRemotionHookBindings(
+    cleaned.replace(/^\s*export\s+/gm, ""),
+  );
 }
 
 // Standalone compile function for use outside React components

@@ -282,6 +282,52 @@ describe("fixCommonSyntaxErrors", () => {
     expect(result.Component).not.toBeNull();
   });
 
+  it("repairs split camel-case identifiers without changing strings or comments", () => {
+    const input = `export const MyAnimation = () => {
+  const frameAtStartOf KenBurns = useCurrentFrame() - 5;
+  const label = "frameAtStartOf KenBurns";
+  // frameAtStartOf KenBurns
+  return <div>{frameAtStartOf KenBurns}</div>;
+};`;
+    const result = compileCode(input);
+    const repaired = fixCommonSyntaxErrors(input);
+
+    expect(repaired).toContain("const frameAtStartOfKenBurns =");
+    expect(repaired).toContain("{frameAtStartOfKenBurns}");
+    expect(repaired).toContain('"frameAtStartOf KenBurns"');
+    expect(repaired).toContain("// frameAtStartOf KenBurns");
+    expect(fixCommonSyntaxErrors(repaired)).toBe(repaired);
+    expect(result.error).toBeNull();
+    expect(result.Component).not.toBeNull();
+  });
+
+  it("adds missing Remotion frame and video-config bindings before preview compilation", () => {
+    const code = `export const MyAnimation = () => {
+  const progress = interpolate(frame, [0, durationInFrames], [0, 1]);
+  return <div style={{ opacity: progress }}>{fps}</div>;
+};`;
+    const body = extractComponentBody(code);
+
+    expect(body).toContain("const frame = useCurrentFrame();");
+    expect(body).toContain(
+      "const { fps, durationInFrames } = useVideoConfig();",
+    );
+    expect(compileCode(code).error).toBeNull();
+  });
+
+  it("does not duplicate Remotion bindings already declared by the component", () => {
+    const body = extractComponentBody(`export const MyAnimation = () => {
+  const frame = useCurrentFrame();
+  const { fps, durationInFrames } = useVideoConfig();
+  return <div>{frame + fps + durationInFrames}</div>;
+};`);
+
+    expect(body.match(/const frame = useCurrentFrame\(\);/g)).toHaveLength(1);
+    expect(
+      body.match(/const \{ fps, durationInFrames \} = useVideoConfig\(\);/g),
+    ).toHaveLength(1);
+  });
+
   it("adds clamp options to interpolate calls missing them", () => {
     const input = `const opacity = interpolate(frame, [0, 60], [0, 1]);`;
     const result = fixCommonSyntaxErrors(input);
@@ -300,6 +346,59 @@ describe("fixCommonSyntaxErrors", () => {
   const whoProgress = interpolate(frame, [LOGO_DURATION, LOGO_DURATION + ABOUT_DURATION], [0, 1]), { extrapolateLeft: "clamp", extrapolateRight: "clamp" };
   const strengthsProgress = interpolate(frame, [LOGO_DURATION + ABOUT_DURATION, LOGO_DURATION + ABOUT_DURATION + STRENGTHS_DURATION], [0, 1]), { extrapolateLeft: "clamp", extrapolateRight: "clamp" };
   return <div>{logoProgress + whoProgress + strengthsProgress}</div>;
+};`);
+
+    expect(result.error).toBeNull();
+    expect(result.Component).not.toBeNull();
+  });
+
+  it("handles nested arguments and multiline calls without changing unrelated text", () => {
+    const input = `const SCENE_DURATION = 90;
+const note = "interpolate(frame, [0, 60], [0, 1])";
+const template = \`interpolate(frame, [0, 60], [0, 1])\`;
+// interpolate(frame, [0, 60], [0, 1])
+/* interpolate(frame, [0, 60], [0, 1]) */
+const progress = interpolate(
+  Math.max(0, frame),
+  [0, Math.max(30, fps * 2)],
+  [0, 1]
+);
+const sceneProgress = interpolate(frame, [ 0, 60 ], [0, 1]);
+const unrelated = customInterpolate(frame, [0, 60], [0, 1]);`;
+
+    const result = fixCommonSyntaxErrors(input);
+
+    expect(result).toContain(
+      'Math.max(30, fps * 2)],\n  [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }\n);',
+    );
+    expect(result).toContain(
+      'interpolate(frame, [0, SCENE_DURATION], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })',
+    );
+    expect(result).toContain('const note = "interpolate(frame, [0, 60], [0, 1])"');
+    expect(result).toContain(
+      "// interpolate(frame, [0, 60], [0, 1])",
+    );
+    expect(result).toContain(
+      "/* interpolate(frame, [0, 60], [0, 1]) */",
+    );
+    expect(result).toContain(
+      "const unrelated = customInterpolate(frame, [0, 60], [0, 1]);",
+    );
+    expect(fixCommonSyntaxErrors(result)).toBe(result);
+  });
+
+  it("compiles nested multiline calls with misplaced options", () => {
+    const result = compileCode(`export const MyAnimation = () => {
+  const frame = useCurrentFrame();
+  const progress = interpolate(
+    Math.max(0, frame),
+    [0, Math.max(30, 60)],
+    [0, 1]
+  ) /* generated outside the call */, {
+    extrapolateRight: "clamp",
+    extrapolateLeft: "clamp"
+  };
+  return <div>{progress}</div>;
 };`);
 
     expect(result.error).toBeNull();

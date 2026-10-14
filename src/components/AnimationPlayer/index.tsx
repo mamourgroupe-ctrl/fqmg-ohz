@@ -11,6 +11,7 @@ const errorTitles: Record<ErrorType, string> = {
   validation: "Invalid Prompt",
   api: "API Error",
   compilation: "Compilation Error",
+  truncated: "Output Truncated",
 };
 
 const renderErrorFallback: ErrorFallback = ({ error }) => {

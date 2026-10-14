@@ -268,6 +268,21 @@ describe("createModelForEntry", () => {
 });
 
 describe("selectWorkingModel", () => {
+  it("skips models that produced truncated output and selects the next configured model", async () => {
+    const first = "ollama:qwen2.5-coder:1.5b";
+    const fallback = "ollama:hf.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M";
+    process.env.MODEL_CHAIN = `${first},openrouter:openrouter/free,${fallback}`;
+    delete process.env.OPENROUTER_API_KEY;
+
+    const result = await selectWorkingModel("qwen2.5-coder:1.5b", {
+      excludedModels: [first],
+    });
+
+    expect(result.entry.fullName).toBe(fallback);
+    expect(result.attempts).toBe(1);
+    expect(generateTextMock).toHaveBeenCalledTimes(1);
+  });
+
   it("skips a provider missing its connection requirements", async () => {
     delete process.env.OPENROUTER_API_KEY;
     process.env.MODEL_CHAIN =
@@ -347,7 +362,71 @@ describe("selectWorkingModel", () => {
 
     await expect(
       selectWorkingModel("test", { pingTimeoutMs: 100 }),
-    ).rejects.toThrow(/No working model is available/i);
+    ).rejects.toMatchObject({
+      code: "MODEL_SELECTION_FAILED",
+      stage: "model_selection",
+      failures: [
+        {
+          provider: "openrouter",
+          model: "test",
+          reason: "required configuration is missing",
+        },
+        {
+          provider: "anthropic",
+          model: "claude-3",
+          reason: "required configuration is missing",
+        },
+        {
+          provider: "openrouter",
+          model: "gpt-4",
+          reason: "required configuration is missing",
+        },
+      ],
+    });
+  });
+
+  it("reports safe provider, model, timeout, and HTTP failure details", async () => {
+    process.env.MODEL_CHAIN =
+      "ollama:qwen2.5-coder:1.5b,ollama:hf.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M";
+    const secret = "ollama-test-key-secret";
+    process.env.OLLAMA_API_KEY = secret;
+    generateTextMock
+      .mockRejectedValueOnce(new Error("Ping timeout"))
+      .mockRejectedValueOnce(
+        Object.assign(new Error(`Authorization: Bearer ${secret}`), {
+          statusCode: 503,
+        }),
+      );
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    let selectionError: unknown;
+    try {
+      await selectWorkingModel("qwen2.5-coder:1.5b");
+    } catch (error) {
+      selectionError = error;
+    }
+
+    expect(selectionError).toMatchObject({
+      code: "MODEL_SELECTION_FAILED",
+      stage: "model_selection",
+      failures: [
+        {
+          provider: "ollama",
+          model: "qwen2.5-coder:1.5b",
+          reason: "ping timed out",
+        },
+        {
+          provider: "ollama",
+          model: "hf.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M",
+          reason: "provider request failed",
+          status: 503,
+        },
+      ],
+    });
+    expect(
+      (selectionError as { publicMessage: string }).publicMessage,
+    ).not.toContain(secret);
+    expect(warning.mock.calls.flat().join(" ")).not.toContain(secret);
   });
 
   it("throws when MODEL_CHAIN contains no models", async () => {

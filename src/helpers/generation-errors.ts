@@ -36,6 +36,12 @@ export function getGenerationStreamErrorMessage(error: unknown): string {
   return getErrorText(error) ?? STREAM_ERROR_FALLBACK;
 }
 
+export function isTruncatedGenerationEvent(
+  event: GenerationStreamEvent,
+): boolean {
+  return event.type === "finish" && event.finishReason === "length";
+}
+
 export function getGenerationHttpErrorMessage(
   payload: unknown,
   status: number,
@@ -47,6 +53,12 @@ export function getGenerationHttpErrorMessage(
 export function getSafeProviderErrorMessage(error: unknown): string {
   const message = getErrorText(error) ?? "";
   const record = asRecord(error);
+  if (
+    record?.code === "MODEL_SELECTION_FAILED" &&
+    typeof record.publicMessage === "string"
+  ) {
+    return record.publicMessage;
+  }
   const rawStatus = record?.statusCode ?? record?.status;
   const status = typeof rawStatus === "number" ? rawStatus : undefined;
 

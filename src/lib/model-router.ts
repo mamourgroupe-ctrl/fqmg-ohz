@@ -16,6 +16,42 @@ export interface ModelEntry {
   fullName: string;
 }
 
+export interface ModelFailureDiagnostic {
+  provider: string;
+  model: string;
+  reason: string;
+  status?: number;
+}
+
+export class ModelSelectionError extends Error {
+  readonly code = "MODEL_SELECTION_FAILED";
+  readonly stage = "model_selection";
+  readonly failures: ModelFailureDiagnostic[];
+  readonly publicMessage: string;
+
+  constructor(
+    configuredModels: number,
+    attempts: number,
+    failures: ModelFailureDiagnostic[],
+  ) {
+    const details = failures
+      .map(
+        ({ provider, model, reason, status }) =>
+          `${provider}:${model} — ${reason}${status ? ` (HTTP ${status})` : ""}`,
+      )
+      .join("; ");
+    const publicMessage =
+      `No working model is available during model selection. Checked ${configuredModels} configured model(s); ${attempts} attempt(s) were made.` +
+      (details ? ` ${details}` : "") +
+      " Verify provider configuration, model availability, and local service responsiveness.";
+
+    super(publicMessage);
+    this.name = "ModelSelectionError";
+    this.failures = failures;
+    this.publicMessage = publicMessage;
+  }
+}
+
 function getDefaultChain(): string {
   return "ollama:qwen2.5-coder:1.5b,openrouter:openrouter/free,ollama:hf.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M";
 }
@@ -48,6 +84,35 @@ function getSafeFailureMessage(error: unknown): string {
     .replace(/\bsk-(?:or-)?[A-Za-z0-9_-]{8,}\b/g, "[REDACTED]")
     .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, "$1[REDACTED]@")
     .slice(0, 500);
+}
+
+function getFailureDiagnostic(
+  entry: ModelEntry,
+  error: unknown,
+): ModelFailureDiagnostic {
+  const record =
+    error !== null && typeof error === "object"
+      ? (error as Record<string, unknown>)
+      : undefined;
+  const rawStatus = record?.statusCode ?? record?.status;
+  const status = typeof rawStatus === "number" ? rawStatus : undefined;
+  const message = error instanceof Error ? error.message : "";
+  let reason = "provider request failed";
+
+  if (status !== undefined) {
+    reason = "provider request failed";
+  } else if (/model .+ not found|model not found/i.test(message)) {
+    reason = "model not found";
+  } else if (/timeout|timed out/i.test(message)) {
+    reason = "ping timed out";
+  }
+
+  return {
+    provider: entry.provider,
+    model: entry.model,
+    reason,
+    ...(status === undefined ? {} : { status }),
+  };
 }
 
 export function getModelChain(preferredModel?: string): ModelEntry[] {
@@ -173,16 +238,28 @@ export function createModelForEntry(entry: ModelEntry): LanguageModel {
 
 export async function selectWorkingModel(
   preferredModel: string,
-  options: { pingTimeoutMs?: number } = {}
+  options: {
+    pingTimeoutMs?: number;
+    excludedModels?: readonly string[];
+  } = {}
 ): Promise<{ model: LanguageModel; entry: ModelEntry; attempts: number }> {
   const chain = getModelChain(preferredModel);
   const pingTimeout = options.pingTimeoutMs ?? 30000;
+  const excludedModels = new Set(options.excludedModels ?? []);
   let attempts = 0;
+  const failures: ModelFailureDiagnostic[] = [];
 
   for (const entry of chain) {
+    if (excludedModels.has(entry.fullName)) continue;
+
     // Skip providers with missing env vars before attempting
     if (!hasRequiredEnvVars(entry.provider)) {
       console.warn(`[Router] ⏭️  Skipping ${entry.fullName} — missing required env vars`);
+      failures.push({
+        provider: entry.provider,
+        model: entry.model,
+        reason: "required configuration is missing",
+      });
       continue;
     }
 
@@ -219,6 +296,7 @@ export async function selectWorkingModel(
       const pingTimeMs = Date.now() - startTime;
       const msg = getSafeFailureMessage(err);
       console.warn(`[Router] ❌ ${entry.fullName} failed after ${pingTimeMs}ms: ${msg}`);
+      failures.push(getFailureDiagnostic(entry, err));
       continue;
     } finally {
       if (timeout) clearTimeout(timeout);
@@ -231,7 +309,5 @@ export async function selectWorkingModel(
     );
   }
 
-  throw new Error(
-    `No working model is available. Checked ${chain.length} configured model(s); ${attempts} attempt(s) were made. Verify provider credentials, endpoints, and model names.`,
-  );
+  throw new ModelSelectionError(chain.length, attempts, failures);
 }

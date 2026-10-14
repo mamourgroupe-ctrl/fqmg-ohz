@@ -80,6 +80,6 @@ export function extractComponentCode(code: string): string {
     }
   }
 
-  // Fallback: return as-is
-  return code;
+  // Some models append a standalone placeholder after an already closed component.
+  return code.replace(/\r?\n[ \t]*\.\.\.[ \t]*\r?\n[ \t]*};[ \t]*$/, "");
 }

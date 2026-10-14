@@ -3,7 +3,15 @@
 import { Loader2 } from "lucide-react";
 import type { NextPage } from "next";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import {
+  Component as ReactComponent,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { AnimationPlayer } from "../../components/AnimationPlayer";
 import { ChatSidebar, type ChatSidebarRef } from "../../components/ChatSidebar";
 import { CodeEditor } from "../../components/CodeEditor";
@@ -22,6 +30,44 @@ import type {
 import type { GenerationErrorType, StreamPhase } from "../../types/generation";
 
 const MAX_CORRECTION_ATTEMPTS = 3;
+
+interface PreviewBoundaryProps {
+  children: ReactNode;
+  onError: (error: Error) => void;
+}
+
+interface PreviewBoundaryState {
+  failed: boolean;
+}
+
+class PreviewBoundary extends ReactComponent<
+  PreviewBoundaryProps,
+  PreviewBoundaryState
+> {
+  state: PreviewBoundaryState = { failed: false };
+
+  static getDerivedStateFromError(): PreviewBoundaryState {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: Error): void {
+    this.props.onError(error);
+  }
+
+  render(): ReactNode {
+    if (this.state.failed) {
+      return (
+        <div
+          className="flex h-full items-center justify-center bg-background-elevated text-muted-foreground"
+          role="alert"
+        >
+          Preview failed. Attempting to recover...
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function GeneratePageContent() {
   const searchParams = useSearchParams();
@@ -299,22 +345,27 @@ function GeneratePageContent() {
               />
             }
             previewContent={
-              <AnimationPlayer
-                Component={generationError ? null : Component}
-                durationInFrames={durationInFrames}
-                fps={fps}
-                onDurationChange={setDurationInFrames}
-                onFpsChange={setFps}
-                aspectRatio={aspectRatio}
-                onAspectRatioChange={setAspectRatio}
-                isCompiling={isCompiling}
-                isStreaming={isStreaming}
-                error={generationError?.message || codeError}
-                errorType={generationError?.type || "compilation"}
-                code={code}
-                onRuntimeError={handleRuntimeError}
-                onFrameChange={setCurrentFrame}
-              />
+              <PreviewBoundary
+                key={code}
+                onError={(error) => handleRuntimeError(error.message)}
+              >
+                <AnimationPlayer
+                  Component={generationError ? null : Component}
+                  durationInFrames={durationInFrames}
+                  fps={fps}
+                  onDurationChange={setDurationInFrames}
+                  onFpsChange={setFps}
+                  aspectRatio={aspectRatio}
+                  onAspectRatioChange={setAspectRatio}
+                  isCompiling={isCompiling}
+                  isStreaming={isStreaming}
+                  error={generationError?.message || codeError}
+                  errorType={generationError?.type || "compilation"}
+                  code={code}
+                  onRuntimeError={handleRuntimeError}
+                  onFrameChange={setCurrentFrame}
+                />
+              </PreviewBoundary>
             }
           />
         </div>

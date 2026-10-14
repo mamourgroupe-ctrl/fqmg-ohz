@@ -5,9 +5,13 @@ import {
   type SkillName,
 } from "@/skills";
 import { getSafeProviderErrorMessage } from "@/helpers/generation-errors";
+import { isExplicitArabicAnimationRequest } from "@/helpers/prompt-validation";
 
 
-import { selectWorkingModel } from "@/lib/model-router";
+import {
+  ModelSelectionError,
+  selectWorkingModel,
+} from "@/lib/model-router";
 import { applyEdits, type EditOperation } from "@/lib/editOperations";
 import { generateObject, streamText } from "ai";
 import { z } from "zod";
@@ -16,6 +20,7 @@ const VALIDATION_PROMPT = `You are a prompt classifier for a motion graphics gen
 
 Determine if the user's prompt is asking for motion graphics/animation content that can be created as a React/Remotion component.
 Use a high-recall interpretation: answer true when the prompt requests, describes, or plausibly implies visual or animated content. A request phrased as a question (for example, "Can you make an animation?") is still valid. If the intent is ambiguous, answer true.
+Classify by meaning regardless of language. Arabic requests such as "اكتب مرحبا بالانميشن" are valid animation requests.
 
 VALID prompts include requests for:
 - Animated text, titles, or typography
@@ -591,6 +596,8 @@ interface GenerateRequest {
   previouslyUsedSkills?: string[];
   /** Base64 image data URLs for visual context */
   frameImages?: string[];
+  /** Models that produced truncated output in an earlier attempt */
+  excludedModels?: string[];
 }
 
 interface GenerateResponse {
@@ -615,7 +622,15 @@ export async function POST(req: Request) {
     errorCorrection,
     previouslyUsedSkills = [],
     frameImages,
+    excludedModels = [],
   }: GenerateRequest = await req.json();
+  const safeExcludedModels = Array.isArray(excludedModels)
+    ? excludedModels
+        .filter((excludedModel): excludedModel is string =>
+          typeof excludedModel === "string",
+        )
+        .slice(0, 16)
+    : [];
 
   // Parse model ID - format can be "model-name" or "model-name:reasoning_effort"
   // Parse model ID: "name" or "name:reasoning_effort" (only if suffix is valid)
@@ -635,7 +650,9 @@ export async function POST(req: Request) {
   let routerResult: Awaited<ReturnType<typeof selectWorkingModel>>;
 
   try {
-    routerResult = await selectWorkingModel(modelName);
+    routerResult = await selectWorkingModel(modelName, {
+      excludedModels: safeExcludedModels,
+    });
   } catch (error) {
     const message = getSafeProviderErrorMessage(error);
     console.error("[Generate] Model selection failed:", message);
@@ -644,6 +661,15 @@ export async function POST(req: Request) {
       JSON.stringify({
         error: message,
         type: "provider_unavailable",
+        ...(error instanceof ModelSelectionError
+          ? {
+              diagnostic: {
+                code: error.code,
+                stage: error.stage,
+                failures: error.failures,
+              },
+            }
+          : {}),
       }),
       {
         status: 503,
@@ -655,7 +681,7 @@ export async function POST(req: Request) {
   const selectedEntry = routerResult.entry;
   console.log(`[Router] Using ${selectedEntry.fullName} (attempts: ${routerResult.attempts})`);
 // Validate the prompt first (skip for follow-ups with existing code)
-  if (!isFollowUp) {
+  if (!isFollowUp && !isExplicitArabicAnimationRequest(prompt)) {
     try {
       const validationResult = await generateObject({
         model: selectedModel,
@@ -1049,8 +1075,10 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
       },
     });
 
+    const responseHeaders = new Headers(originalResponse.headers);
+    responseHeaders.set("x-generation-model", selectedEntry.fullName);
     return new Response(stream, {
-      headers: originalResponse.headers,
+      headers: responseHeaders,
     });
   } catch (error) {
     console.error("Error generating code:", error);
@@ -1062,5 +1090,3 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
     );
   }
 }
-
-

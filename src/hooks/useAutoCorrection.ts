@@ -121,7 +121,11 @@ export function useAutoCorrection({
 
   // Handle generation/API errors
   useEffect(() => {
-    if (generationError && shouldAutoCorrect()) {
+    if (
+      generationError &&
+      generationError.type !== "truncated" &&
+      shouldAutoCorrect()
+    ) {
       const nextAttempt = (errorCorrection?.attemptNumber ?? 0) + 1;
       console.log(
         `Auto-retry attempt ${nextAttempt}/${maxAttempts} for generation error:`,

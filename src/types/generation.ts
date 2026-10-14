@@ -23,7 +23,7 @@ export type ModelId = (typeof MODELS)[number]["id"];
 
 export type StreamPhase = "idle" | "reasoning" | "generating";
 
-export type GenerationErrorType = "validation" | "api";
+export type GenerationErrorType = "validation" | "api" | "truncated";
 
 // ─── Aspect Ratios for Social Media ───
 export const ASPECT_RATIOS = {

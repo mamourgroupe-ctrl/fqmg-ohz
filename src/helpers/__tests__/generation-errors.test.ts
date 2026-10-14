@@ -3,6 +3,7 @@ import {
   getGenerationHttpErrorMessage,
   getGenerationStreamErrorMessage,
   getSafeProviderErrorMessage,
+  isTruncatedGenerationEvent,
   parseGenerationStreamEvent,
 } from "@/helpers/generation-errors";
 
@@ -14,6 +15,16 @@ describe("generation stream errors", () => {
       ),
     ).toEqual({ type: "text-delta", delta: "const code = true;" });
     expect(parseGenerationStreamEvent("[DONE]")).toBeNull();
+  });
+
+  it("recognizes output-limit finish events without flagging normal finishes", () => {
+    expect(
+      isTruncatedGenerationEvent({ type: "finish", finishReason: "length" }),
+    ).toBe(true);
+    expect(
+      isTruncatedGenerationEvent({ type: "finish", finishReason: "stop" }),
+    ).toBe(false);
+    expect(isTruncatedGenerationEvent({ type: "text-delta" })).toBe(false);
   });
 
   it("preserves a streamed error message", () => {
@@ -59,5 +70,17 @@ describe("generation stream errors", () => {
     expect(getSafeProviderErrorMessage({ status: 404 })).toBe(
       "The AI provider could not find the selected model or endpoint (HTTP 404). Verify the provider configuration.",
     );
+  });
+
+  it("preserves safe model-selection diagnostics", () => {
+    const publicMessage =
+      "No working model is available during model selection. qwen2.5-coder:1.5b — ping timed out.";
+
+    expect(
+      getSafeProviderErrorMessage({
+        code: "MODEL_SELECTION_FAILED",
+        publicMessage,
+      }),
+    ).toBe(publicMessage);
   });
 });
