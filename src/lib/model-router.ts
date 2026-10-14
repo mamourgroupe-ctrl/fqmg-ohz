@@ -10,6 +10,16 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createAzure } from "@ai-sdk/azure";
 import { generateText, type LanguageModel } from "ai";
 
+export class ModelRouterError extends Error {
+  constructor(
+    message: string,
+    public readonly code: "AI_NOT_CONFIGURED" | "AI_UNAVAILABLE",
+  ) {
+    super(message);
+    this.name = "ModelRouterError";
+  }
+}
+
 export interface ModelEntry {
   provider: string;
   model: string;
@@ -201,6 +211,7 @@ export async function selectWorkingModel(
           model,
           prompt: "Reply with exactly: OK",
           maxOutputTokens: 10,
+          maxRetries: 0,
           abortSignal: abortController.signal,
         }),
         new Promise<never>((_, reject) => {
@@ -225,13 +236,15 @@ export async function selectWorkingModel(
     }
   }
 
-  if (chain.length === 0) {
-    throw new Error(
-      "No models are configured. Check the MODEL_CHAIN environment variable.",
+  if (attempts === 0) {
+    throw new ModelRouterError(
+      "No AI provider is configured for the selected model chain. For Qwen via Ollama, include an Ollama model in MODEL_CHAIN and run Ollama with that model. If it is not running locally, set OLLAMA_BASE_URL in .env.local to its server URL ending in /v1. For OpenRouter, set OPENROUTER_API_KEY. Use MODEL_CHAIN to configure other providers. Restart the server after changing settings. An OpenAI key is not required for Ollama.",
+      "AI_NOT_CONFIGURED",
     );
   }
 
-  throw new Error(
-    `No working model is available. Checked ${chain.length} configured model(s); ${attempts} attempt(s) were made. Verify provider credentials, endpoints, and model names.`,
+  throw new ModelRouterError(
+    "None of the configured AI models could be reached successfully. Check the provider URL, credentials, model availability and network access, then try again.",
+    "AI_UNAVAILABLE",
   );
 }

@@ -7,7 +7,7 @@ import {
 import { getSafeProviderErrorMessage } from "@/helpers/generation-errors";
 
 
-import { selectWorkingModel } from "@/lib/model-router";
+import { ModelRouterError, selectWorkingModel } from "@/lib/model-router";
 import { applyEdits, type EditOperation } from "@/lib/editOperations";
 import { generateObject, streamText } from "ai";
 import { z } from "zod";
@@ -630,30 +630,29 @@ export async function POST(req: Request) {
       reasoningEffort = suffix;
     }
   }
-    // ─── Model Router: select a working model ───
+  // Validate configuration through the router, not a provider-specific API key.
   let routerResult: Awaited<ReturnType<typeof selectWorkingModel>>;
-
   try {
     routerResult = await selectWorkingModel(modelName);
   } catch (error) {
-    const message = getSafeProviderErrorMessage(error);
+    // Router errors contain application-authored guidance; sanitize SDK failures.
+    const message = error instanceof ModelRouterError
+      ? error.message
+      : getSafeProviderErrorMessage(error);
     console.error("[Generate] Model selection failed:", message);
-
-    return new Response(
-      JSON.stringify({
+    return Response.json(
+      {
         error: message,
         type: "provider_unavailable",
-      }),
-      {
-        status: 503,
-        headers: { "Content-Type": "application/json" },
+        code: error instanceof ModelRouterError ? error.code : "AI_UNAVAILABLE",
       },
+      { status: 503 },
     );
   }
   const selectedModel = routerResult.model;
   const selectedEntry = routerResult.entry;
   console.log(`[Router] Using ${selectedEntry.fullName} (attempts: ${routerResult.attempts})`);
-// Validate the prompt first (skip for follow-ups with existing code)
+  // Validate the prompt first (skip for follow-ups with existing code)
   if (!isFollowUp) {
     try {
       const validationResult = await generateObject({
@@ -1053,7 +1052,7 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
     console.error("Error generating code:", error);
     return new Response(
       JSON.stringify({
-        error: "Something went wrong while trying to reach OpenAI APIs.",
+        error: "Something went wrong while trying to reach the configured AI provider.",
       }),
       { status: 500, headers: { "Content-Type": "application/json" } },
     );

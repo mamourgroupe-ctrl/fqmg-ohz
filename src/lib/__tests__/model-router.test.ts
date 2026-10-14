@@ -31,7 +31,7 @@ vi.mock("@ai-sdk/azure", () => ({ createAzure: createAzureMock }));
 const originalEnv = process.env;
 
 beforeEach(() => {
-  vi.resetModules();
+  vi.resetAllMocks();
   process.env = { ...originalEnv };
   vi.clearAllMocks();
   generateTextMock.mockResolvedValue({});
@@ -46,6 +46,7 @@ beforeEach(() => {
 afterEach(() => {
   process.env = originalEnv;
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe("getModelChain", () => {
@@ -268,6 +269,22 @@ describe("createModelForEntry", () => {
 });
 
 describe("selectWorkingModel", () => {
+  it("selects Ollama without an OpenAI API key", async () => {
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.OLLAMA_BASE_URL;
+    process.env.MODEL_CHAIN = "ollama:qwen2.5-coder:1.5b";
+    const result = await selectWorkingModel("qwen2.5-coder:1.5b");
+    expect(result.entry.provider).toBe("ollama");
+    expect(result.attempts).toBe(1);
+    expect(generateTextMock).toHaveBeenCalledWith(expect.objectContaining({ maxRetries: 0 }));
+  });
+
+  it("reports unavailable models rather than returning a failed model", async () => {
+    process.env.MODEL_CHAIN = "ollama:qwen";
+    generateTextMock.mockRejectedValueOnce(new Error("Connection refused"));
+    await expect(selectWorkingModel("")).rejects.toMatchObject({ code: "AI_UNAVAILABLE" });
+  });
+
   it("skips a provider missing its connection requirements", async () => {
     delete process.env.OPENROUTER_API_KEY;
     process.env.MODEL_CHAIN =
@@ -326,7 +343,7 @@ describe("selectWorkingModel", () => {
 
     const selection = expect(
       selectWorkingModel("qwen2.5-coder:1.5b", { pingTimeoutMs: 50 }),
-    ).rejects.toThrow(/No working model is available/i);
+    ).rejects.toMatchObject({ code: "AI_UNAVAILABLE" });
     await vi.advanceTimersByTimeAsync(50);
 
     await selection;
@@ -347,7 +364,7 @@ describe("selectWorkingModel", () => {
 
     await expect(
       selectWorkingModel("test", { pingTimeoutMs: 100 }),
-    ).rejects.toThrow(/No working model is available/i);
+    ).rejects.toMatchObject({ code: "AI_NOT_CONFIGURED" });
   });
 
   it("throws when MODEL_CHAIN contains no models", async () => {
@@ -355,7 +372,7 @@ describe("selectWorkingModel", () => {
 
     await expect(
       selectWorkingModel("", { pingTimeoutMs: 100 }),
-    ).rejects.toThrow(/No models are configured/i);
+    ).rejects.toMatchObject({ code: "AI_NOT_CONFIGURED" });
   });
 });
 
