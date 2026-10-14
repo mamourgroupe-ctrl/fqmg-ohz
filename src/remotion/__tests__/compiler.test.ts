@@ -272,10 +272,38 @@ describe("fixCommonSyntaxErrors", () => {
     expect(result.Component).not.toBeNull();
   });
 
+  it("repairs a split durationInFrames identifier before compiling", () => {
+    const result = compileCode(`export const MyAnimation = () => {
+  const config = { durationIn Frames: 90 };
+  return <div>{config.durationIn Frames}</div>;
+};`);
+
+    expect(result.error).toBeNull();
+    expect(result.Component).not.toBeNull();
+  });
+
   it("adds clamp options to interpolate calls missing them", () => {
     const input = `const opacity = interpolate(frame, [0, 60], [0, 1]);`;
     const result = fixCommonSyntaxErrors(input);
-    expect(result).toContain('{ extrapolateLeft: "clamp", extrapolateRight: "clamp" }');
+    expect(result).toBe(
+      'const opacity = interpolate(frame, [0, 60], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });',
+    );
+  });
+
+  it("compiles multiple interpolate calls after adding clamp options", () => {
+    const result = compileCode(`export const MyAnimation = () => {
+  const LOGO_DURATION = 30;
+  const ABOUT_DURATION = 30;
+  const STRENGTHS_DURATION = 30;
+  const frame = useCurrentFrame();
+  const logoProgress = interpolate(frame, [0, LOGO_DURATION], [0, 1]), { extrapolateLeft: "clamp", extrapolateRight: "clamp" };
+  const whoProgress = interpolate(frame, [LOGO_DURATION, LOGO_DURATION + ABOUT_DURATION], [0, 1]), { extrapolateLeft: "clamp", extrapolateRight: "clamp" };
+  const strengthsProgress = interpolate(frame, [LOGO_DURATION + ABOUT_DURATION, LOGO_DURATION + ABOUT_DURATION + STRENGTHS_DURATION], [0, 1]), { extrapolateLeft: "clamp", extrapolateRight: "clamp" };
+  return <div>{logoProgress + whoProgress + strengthsProgress}</div>;
+};`);
+
+    expect(result.error).toBeNull();
+    expect(result.Component).not.toBeNull();
   });
 
   it("does not add clamp when already present", () => {

@@ -943,10 +943,12 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
         headers: { "Content-Type": "application/json" },
       });
     } catch (error) {
-      console.error("Error in follow-up edit:", error);
+      const message = getSafeProviderErrorMessage(error);
+      console.error("[Generate] Follow-up edit failed:", message);
       return new Response(
         JSON.stringify({
-          error: "Something went wrong while processing the edit request.",
+          error: message,
+          type: "provider_unavailable",
         }),
         { status: 500, headers: { "Content-Type": "application/json" } },
       );
@@ -1060,6 +1062,5 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
     );
   }
 }
-
 
 

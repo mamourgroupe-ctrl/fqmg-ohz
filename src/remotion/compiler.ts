@@ -41,6 +41,7 @@ export interface CompilationResult {
 export function fixCommonSyntaxErrors(code: string): string {
   // Close destructured callback parameters when generated arrow functions omit `)`.
   code = code.replace(/\(\s*\{\s*transition\s*\}\s*=>/g, "({ transition }) =>");
+  code = code.replace(/\bdurationIn\s+Frames\b/g, "durationInFrames");
 
   // Fix `const NAME NAME NAME = ...` → `const NAME_NAME_NAME = ...`
   // Handles any number of uppercase words: COLOR UNDERLINE, LOGO ENTER DURATION, etc.
@@ -58,17 +59,22 @@ export function fixCommonSyntaxErrors(code: string): string {
     },
   );
 
+  // Move misplaced interpolate options back inside the call.
+  code = code.replace(
+    /(interpolate\s*\(\s*([^,]+)\s*,\s*(\[[^\]]+\])\s*,\s*(\[[^\]]+\])\s*\))\s*,\s*(\{\s*extrapolateLeft\s*:\s*["']clamp["']\s*,\s*extrapolateRight\s*:\s*["']clamp["']\s*\})/g,
+    (match, call) => {
+      const options = match.slice(call.length).replace(/^\s*,\s*/, "");
+      return `${call.slice(0, -1)}, ${options})`;
+    },
+  );
+
   // Fix interpolate calls missing clamp options
   // interpolate(frame, [0, 60], [0, 1]) → interpolate(frame, [0, 60], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })
   code = code.replace(
     /interpolate\s*\(\s*([^,]+)\s*,\s*(\[[^\]]+\])\s*,\s*(\[[^\]]+\])\s*\)/g,
     (match) => {
-      // Already has options (4th argument)
-      const afterMatch = code.slice(code.indexOf(match) + match.length).trimStart();
-      if (afterMatch.startsWith(",")) {
-        return match;
-      }
-      return `${match}, { extrapolateLeft: "clamp", extrapolateRight: "clamp" }`;
+      const callWithoutClosingParen = match.replace(/\s*\)$/, "");
+      return `${callWithoutClosingParen}, { extrapolateLeft: "clamp", extrapolateRight: "clamp" })`;
     },
   );
 
