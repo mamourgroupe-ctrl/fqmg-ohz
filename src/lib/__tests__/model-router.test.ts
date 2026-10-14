@@ -1,11 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { getModelChain, createModelForEntry, selectWorkingModel, hasRequiredEnvVars } from "../model-router";
 
+import { generateText } from "ai";
+
+vi.mock("ai", () => ({ generateText: vi.fn() }));
+
 // Mock environment variables
 const originalEnv = process.env;
 
 beforeEach(() => {
-  vi.resetModules();
+  vi.clearAllMocks();
   process.env = { ...originalEnv };
 });
 
@@ -126,16 +130,34 @@ describe("createModelForEntry", () => {
 });
 
 describe("selectWorkingModel", () => {
-  it("skips providers with missing env vars", async () => {
-    // No env vars set - all should be skipped
+  it("reports missing configuration instead of returning an unconfigured fallback", async () => {
     process.env.MODEL_CHAIN = "anthropic:claude-3,openrouter:gpt-4,ollama:qwen";
-    // Should not throw even though all fail
-    // Since all providers lack env vars, they'll all be skipped and fall back to last
-    const result = await selectWorkingModel("test", { pingTimeoutMs: 100 });
-    // Should return something (the fallback)
-    expect(result).toBeDefined();
-    expect(result.model).toBeDefined();
-    expect(result.entry).toBeDefined();
-    expect(typeof result.attempts).toBe("number");
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+    delete process.env.OLLAMA_BASE_URL;
+    await expect(selectWorkingModel("")).rejects.toMatchObject({ code: "AI_NOT_CONFIGURED" });
+    expect(generateText).not.toHaveBeenCalled();
+  });
+
+  it("selects Ollama without an OpenAI API key", async () => {
+    delete process.env.OPENAI_API_KEY;
+    process.env.MODEL_CHAIN = "ollama:qwen2.5-coder:7b";
+    process.env.OLLAMA_BASE_URL = "http://localhost:11434/v1";
+    vi.mocked(generateText).mockResolvedValueOnce({ text: "OK" } as Awaited<ReturnType<typeof generateText>>);
+    const result = await selectWorkingModel("qwen2.5-coder:7b");
+    expect(result.entry.provider).toBe("ollama");
+    expect(result.attempts).toBe(1);
+  });
+
+  it("reports unavailable models rather than returning a failed model", async () => {
+    process.env.MODEL_CHAIN = "ollama:qwen";
+    process.env.OLLAMA_BASE_URL = "http://localhost:11434/v1";
+    vi.mocked(generateText).mockRejectedValueOnce(new Error("Connection refused"));
+    await expect(selectWorkingModel("")).rejects.toMatchObject({ code: "AI_UNAVAILABLE" });
+  });
+
+  it("handles an empty model chain without crashing", async () => {
+    process.env.MODEL_CHAIN = ", ,";
+    await expect(selectWorkingModel("")).rejects.toMatchObject({ code: "AI_NOT_CONFIGURED" });
   });
 });

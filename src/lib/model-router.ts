@@ -10,6 +10,16 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createAzure } from "@ai-sdk/azure";
 import { generateText, type LanguageModel } from "ai";
 
+export class ModelRouterError extends Error {
+  constructor(
+    message: string,
+    public readonly code: "AI_NOT_CONFIGURED" | "AI_UNAVAILABLE",
+  ) {
+    super(message);
+    this.name = "ModelRouterError";
+  }
+}
+
 export interface ModelEntry {
   provider: string;
   model: string;
@@ -155,16 +165,13 @@ export async function selectWorkingModel(
     try {
       const model = createModelForEntry(entry);
 
-      await Promise.race([
-        generateText({
-          model,
-          prompt: "Reply with exactly: OK",
-          maxOutputTokens: 10,
-        }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("Ping timeout")), pingTimeout)
-        ),
-      ]);
+      await generateText({
+        model,
+        prompt: "Reply with exactly: OK",
+        maxOutputTokens: 10,
+        maxRetries: 0,
+        abortSignal: AbortSignal.timeout(pingTimeout),
+      });
 
       const pingTimeMs = Date.now() - startTime;
       console.log(`[Router] ✅ Selected ${entry.fullName} (ping: ${pingTimeMs}ms)`);
@@ -177,7 +184,15 @@ export async function selectWorkingModel(
     }
   }
 
-  const last = chain[chain.length - 1];
-  console.warn(`[Router] ⚠️  All models failed. Falling back to ${last.fullName} anyway.`);
-  return { model: createModelForEntry(last), entry: last, attempts };
+  if (attempts === 0) {
+    throw new ModelRouterError(
+      "No AI provider is configured for the selected model chain. For Qwen via Ollama, run Ollama with the selected model and set OLLAMA_BASE_URL in .env.local to its server URL ending in /v1. For OpenRouter, set OPENROUTER_API_KEY. Use MODEL_CHAIN to configure other providers. Restart the server after changing settings. An OpenAI key is not required for Ollama.",
+      "AI_NOT_CONFIGURED",
+    );
+  }
+
+  throw new ModelRouterError(
+    "None of the configured AI models could be reached successfully. Check the provider URL, credentials, model availability and network access, then try again.",
+    "AI_UNAVAILABLE",
+  );
 }
