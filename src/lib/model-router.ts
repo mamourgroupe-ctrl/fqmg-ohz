@@ -23,7 +23,17 @@ export interface ModelFailureDiagnostic {
   status?: number;
 }
 
-export class ModelSelectionError extends Error {
+export class ModelRouterError extends Error {
+  readonly code: string;
+
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = "ModelRouterError";
+    this.code = code;
+  }
+}
+
+export class ModelSelectionError extends ModelRouterError {
   readonly code = "MODEL_SELECTION_FAILED";
   readonly stage = "model_selection";
   readonly failures: ModelFailureDiagnostic[];
@@ -45,7 +55,7 @@ export class ModelSelectionError extends Error {
       (details ? ` ${details}` : "") +
       " Verify provider configuration, model availability, and local service responsiveness.";
 
-    super(publicMessage);
+    super(publicMessage, "MODEL_SELECTION_FAILED");
     this.name = "ModelSelectionError";
     this.failures = failures;
     this.publicMessage = publicMessage;
@@ -240,8 +250,8 @@ export async function selectWorkingModel(
   preferredModel: string,
   options: {
     pingTimeoutMs?: number;
-    excludedModels?: readonly string[];
-  } = {}
+    excludedModels?: string[];
+  } = {},
 ): Promise<{ model: LanguageModel; entry: ModelEntry; attempts: number }> {
   const chain = getModelChain(preferredModel);
   const pingTimeout = options.pingTimeoutMs ?? 30000;

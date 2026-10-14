@@ -9,6 +9,7 @@ import { isExplicitArabicAnimationRequest } from "@/helpers/prompt-validation";
 
 
 import {
+  ModelRouterError,
   ModelSelectionError,
   selectWorkingModel,
 } from "@/lib/model-router";
@@ -650,16 +651,26 @@ export async function POST(req: Request) {
   let routerResult: Awaited<ReturnType<typeof selectWorkingModel>>;
 
   try {
-    routerResult = await selectWorkingModel(modelName, {
-      excludedModels: safeExcludedModels,
-    });
+    routerResult =
+      safeExcludedModels.length > 0
+        ? await selectWorkingModel(modelName, {
+            excludedModels: safeExcludedModels,
+          })
+        : await selectWorkingModel(modelName);
   } catch (error) {
-    const message = getSafeProviderErrorMessage(error);
+    const message =
+      error instanceof ModelRouterError
+        ? error.message
+        : getSafeProviderErrorMessage(error);
     console.error("[Generate] Model selection failed:", message);
 
     return new Response(
       JSON.stringify({
         error: message,
+        code:
+          error instanceof ModelRouterError
+            ? error.code
+            : "AI_UNAVAILABLE",
         type: "provider_unavailable",
         ...(error instanceof ModelSelectionError
           ? {
@@ -969,11 +980,18 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
         headers: { "Content-Type": "application/json" },
       });
     } catch (error) {
-      const message = getSafeProviderErrorMessage(error);
+      const message =
+        error instanceof ModelRouterError
+          ? error.message
+          : getSafeProviderErrorMessage(error);
       console.error("[Generate] Follow-up edit failed:", message);
       return new Response(
         JSON.stringify({
           error: message,
+          code:
+            error instanceof ModelRouterError
+              ? error.code
+              : "AI_UNAVAILABLE",
           type: "provider_unavailable",
         }),
         { status: 500, headers: { "Content-Type": "application/json" } },
