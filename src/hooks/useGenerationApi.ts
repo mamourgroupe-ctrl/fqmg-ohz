@@ -3,6 +3,11 @@ import {
   stripMarkdownFences,
   validateGptResponse,
 } from "@/helpers/sanitize-response";
+import {
+  getGenerationHttpErrorMessage,
+  getGenerationStreamErrorMessage,
+  parseGenerationStreamEvent,
+} from "@/helpers/generation-errors";
 import type {
   AssistantMetadata,
   ConversationContextMessage,
@@ -128,15 +133,24 @@ export function useGenerationApi(): UseGenerationApiReturn {
         });
 
         if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          const errorMessage =
-            errorData.error || `API error: ${response.status}`;
-          if (errorData.type === "edit_failed") {
-            onError?.(errorMessage, "validation", errorData.failedEdit);
-            onErrorMessage?.(errorMessage, "edit_failed", errorData.failedEdit);
+          const errorData: unknown = await response.json().catch(() => null);
+          const errorFields =
+            errorData !== null && typeof errorData === "object"
+              ? (errorData as Record<string, unknown>)
+              : {};
+          const errorMessage = getGenerationHttpErrorMessage(
+            errorData,
+            response.status,
+          );
+          if (errorFields.type === "edit_failed") {
+            const failedEdit = errorFields.failedEdit as
+              | FailedEditInfo
+              | undefined;
+            onError?.(errorMessage, "validation", failedEdit);
+            onErrorMessage?.(errorMessage, "edit_failed", failedEdit);
             return;
           }
-          if (errorData.type === "validation") {
+          if (errorFields.type === "validation") {
             onError?.(errorMessage, "validation");
             onErrorMessage?.(errorMessage, "validation");
             return;
@@ -179,35 +193,44 @@ export function useGenerationApi(): UseGenerationApiReturn {
           for (const line of lines) {
             if (!line.startsWith("data: ")) continue;
             const data = line.slice(6);
-            if (data === "[DONE]") continue;
 
             try {
-              const event = JSON.parse(data);
+              const event = parseGenerationStreamEvent(data);
+              if (!event) continue;
               if (event.type === "metadata") {
+                const skills = Array.isArray(event.skills)
+                  ? event.skills.filter(
+                      (skill): skill is string => typeof skill === "string",
+                    )
+                  : undefined;
                 streamMetadata = {
                   ...streamMetadata,
-                  skills: event.skills,
+                  skills,
                 };
-                onPendingMessage?.(event.skills);
+                onPendingMessage?.(skills);
               } else if (event.type === "reasoning-start") {
                 onStreamPhaseChange?.("reasoning");
               } else if (event.type === "text-start") {
                 onStreamPhaseChange?.("generating");
               } else if (event.type === "text-delta") {
+                if (typeof event.delta !== "string") {
+                  throw new TypeError("The generation stream returned invalid text.");
+                }
                 accumulatedText += event.delta;
                 const codeToShow = stripMarkdownFences(accumulatedText);
                 onCodeGenerated?.(codeToShow);
               } else if (event.type === "error") {
-                console.error("STREAM ERROR:", event.error);
-            throw new Error(event.error);
+                const errorMessage = getGenerationStreamErrorMessage(
+                  event.errorText ?? event.error,
+                );
+                console.error("STREAM ERROR:", errorMessage);
+                throw new Error(errorMessage);
               }
             } catch (parseError) {
-              if (
-                parseError instanceof Error &&
-                parseError.message !== "Unexpected token"
-              ) {
-                throw parseError;
+              if (parseError instanceof SyntaxError) {
+                throw new Error("The generation stream returned invalid data.");
               }
+              throw parseError;
             }
           }
         }
@@ -248,5 +271,3 @@ export function useGenerationApi(): UseGenerationApiReturn {
     runGeneration,
   };
 }
-
-

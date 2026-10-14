@@ -9,6 +9,11 @@ import { completeRenderJobWithOutput, RenderJobSchema, verifyRenderOutput } from
 
 let temporaryDirectory = "";
 
+const syntheticPngFrame = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAKAAAABaCAIAAACwpMoFAAAAQElEQVR4nO3BAQ0AAADCoPdPbQ8HFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8GOpGgABimw4TgAAAABJRU5ErkJggg==",
+  "base64",
+);
+
 function getRemotionBinary(type: "ffmpeg" | "ffprobe"): string | undefined {
   try {
     const executable = RenderInternals.getExecutablePath({
@@ -63,38 +68,32 @@ describe("render job integrity", () => {
     }, filePath)).rejects.toThrow();
   });
 
-  it.skipIf(!bundledFfmpeg || !bundledFfprobe)("validates a real synthetic MP4 using Remotion's bundled ffmpeg and ffprobe", async () => {
+  it("validates a real synthetic MP4 using Remotion's bundled ffmpeg and ffprobe", async () => {
+    if (!bundledFfmpeg || !bundledFfprobe) {
+      throw new Error("Remotion's bundled ffmpeg and ffprobe are required for the MP4 integrity test.");
+    }
+
     temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "fqmg-render-smoke-"));
     const width = 160;
     const height = 90;
     const fps = 24;
     const frameCount = 24;
+    const inputPath = path.join(temporaryDirectory, "frame.png");
     const outputPath = path.join(temporaryDirectory, "smoke.mp4");
 
-    try {
-      execFileSync(bundledFfmpeg!, [
-        "-hide_banner", "-loglevel", "error",
-        "-f", "lavfi",
-        "-i", `nullsrc=s=${width}x${height}:r=${fps}`,
-        "-frames:v", String(frameCount),
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart",
-        "-y", outputPath,
-      ], { timeout: 30_000 });
-    } catch (error) {
-      const message = String((error as Error)?.message ?? error) + String((error as { stderr?: unknown })?.stderr ?? "");
-      // The compositor-win32-x64-msvc build is a minimal FFmpeg for Remotion compositing.
-      // It lacks the wrapped_avframe decoder needed for lavfi -> libx264, so it always fails
-      // with "Decoding requested, but no decoder found for: wrapped_avframe" on Windows.
-      // This is an environment limitation, not a code bug. Skip gracefully and hint to install full FFmpeg.
-      if (message.includes("wrapped_avframe") || message.includes("No decoder found") || message.includes("Invalid argument")) {
-        console.warn("[render-job.test] Skipped: bundled compositor FFmpeg cannot synthesize video (wrapped_avframe). Install full FFmpeg (winget install Gyan.FFmpeg) for local MP4 verification.");
-        return;
-      }
-      throw error;
-    }
+    await writeFile(inputPath, syntheticPngFrame);
+    execFileSync(bundledFfmpeg, [
+      "-hide_banner", "-loglevel", "error",
+      "-loop", "1",
+      "-framerate", String(fps),
+      "-i", inputPath,
+      "-frames:v", String(frameCount),
+      "-c:v", "libx264",
+      "-preset", "ultrafast",
+      "-pix_fmt", "yuv420p",
+      "-movflags", "+faststart",
+      "-y", outputPath,
+    ], { timeout: 30_000 });
 
     const verified = await verifyRenderOutput(outputPath);
     const completed = await completeRenderJobWithOutput({

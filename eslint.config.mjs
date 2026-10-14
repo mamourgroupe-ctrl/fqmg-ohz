@@ -23,6 +23,7 @@ export default [
       "voice-live-output/**",
       // Vendored Remotion skill references (docs/samples), not application code.
       ".agents/**",
+      ".kilo/**",
       "next-env.d.ts",
       "next.config.js",
       "deploy.mjs",

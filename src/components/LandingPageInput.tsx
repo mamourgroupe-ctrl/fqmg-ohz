@@ -51,7 +51,7 @@ export function LandingPageInput({
   showCodeExamplesLink = false,
 }: LandingPageInputProps) {
   const [prompt, setPrompt] = useState("");
-  const [model, setModel] = useState<ModelId>("openrouter/free");
+  const [model, setModel] = useState<ModelId>(MODELS[0].id);
   const {
     attachedImages,
     isDragging,

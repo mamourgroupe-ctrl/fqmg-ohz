@@ -4,6 +4,7 @@ import {
   SKILL_NAMES,
   type SkillName,
 } from "@/skills";
+import { getSafeProviderErrorMessage } from "@/helpers/generation-errors";
 
 
 import { selectWorkingModel } from "@/lib/model-router";
@@ -615,21 +616,6 @@ export async function POST(req: Request) {
     frameImages,
   }: GenerateRequest = await req.json();
 
-  const apiKey = process.env.OPENAI_API_KEY;
-
-  if (!apiKey) {
-    return new Response(
-      JSON.stringify({
-        error:
-          'The environment variable "OPENAI_API_KEY" is not set. Add it to your .env file and try again.',
-      }),
-      {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      },
-    );
-  }
-
   // Parse model ID - format can be "model-name" or "model-name:reasoning_effort"
   // Parse model ID: "name" or "name:reasoning_effort" (only if suffix is valid)
   // Preserves Ollama tags like ":1.5b", ":7b"
@@ -645,7 +631,25 @@ export async function POST(req: Request) {
     }
   }
     // ─── Model Router: select a working model ───
-  const routerResult = await selectWorkingModel(modelName);
+  let routerResult: Awaited<ReturnType<typeof selectWorkingModel>>;
+
+  try {
+    routerResult = await selectWorkingModel(modelName);
+  } catch (error) {
+    const message = getSafeProviderErrorMessage(error);
+    console.error("[Generate] Model selection failed:", message);
+
+    return new Response(
+      JSON.stringify({
+        error: message,
+        type: "provider_unavailable",
+      }),
+      {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+  }
   const selectedModel = routerResult.model;
   const selectedEntry = routerResult.entry;
   console.log(`[Router] Using ${selectedEntry.fullName} (attempts: ${routerResult.attempts})`);
@@ -1005,6 +1009,11 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
     // Get the original stream response
     const originalResponse = result.toUIMessageStreamResponse({
       sendReasoning: true,
+      onError: (error) => {
+        const message = getSafeProviderErrorMessage(error);
+        console.error("[Generate] Provider stream failed:", message);
+        return message;
+      },
     });
 
     // Create metadata event to prepend

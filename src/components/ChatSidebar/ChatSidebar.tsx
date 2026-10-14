@@ -110,7 +110,7 @@ export const ChatSidebar = forwardRef<ChatSidebarRef, ChatSidebarProps>(
     },
     ref,
   ) {
-    const [model, setModel] = useState<ModelId>(MODELS[1].id);
+    const [model, setModel] = useState<ModelId>(MODELS[0].id);
     const promptRef = useRef<string>("");
 
     const { isLoading, runGeneration } = useGenerationApi();

@@ -41,6 +41,7 @@ build
 .claude/
 .qodo/
 .agents/local/
+.kilo/
 
 # Remotion output
 .render/
