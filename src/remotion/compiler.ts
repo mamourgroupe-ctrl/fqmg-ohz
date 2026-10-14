@@ -39,6 +39,9 @@ export interface CompilationResult {
 // Safety layer in case LLM includes full ES6 syntax despite instructions
 // ─── Fix common AI syntax errors ───
 export function fixCommonSyntaxErrors(code: string): string {
+  // Close destructured callback parameters when generated arrow functions omit `)`.
+  code = code.replace(/\(\s*\{\s*transition\s*\}\s*=>/g, "({ transition }) =>");
+
   // Fix `const NAME NAME NAME = ...` → `const NAME_NAME_NAME = ...`
   // Handles any number of uppercase words: COLOR UNDERLINE, LOGO ENTER DURATION, etc.
   code = code.replace(

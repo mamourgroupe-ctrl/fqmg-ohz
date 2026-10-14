@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ensureRequiredImports, extractComponentBody, removeUnusedImports, fixCommonSyntaxErrors } from "../compiler";
+import { ensureRequiredImports, extractComponentBody, removeUnusedImports, fixCommonSyntaxErrors, compileCode } from "../compiler";
 
 describe("ensureRequiredImports", () => {
   it("adds import for code without imports", () => {
@@ -254,6 +254,24 @@ export const MyAnimation = () => {
 });
 
 describe("fixCommonSyntaxErrors", () => {
+  it("closes destructured transition callback parameters", () => {
+    expect(fixCommonSyntaxErrors("const render = ({ transition } => (transition);")).toBe(
+      "const render = ({ transition }) => (transition);",
+    );
+  });
+
+  it("compiles components with a malformed destructured transition callback", () => {
+    const result = compileCode(`export const MyAnimation = () => {
+  const render = ({ transition } => (
+    <div style={{ opacity: transition.progress }} />
+  );
+  return render({ transition: { progress: 1 } });
+};`);
+
+    expect(result.error).toBeNull();
+    expect(result.Component).not.toBeNull();
+  });
+
   it("adds clamp options to interpolate calls missing them", () => {
     const input = `const opacity = interpolate(frame, [0, 60], [0, 1]);`;
     const result = fixCommonSyntaxErrors(input);

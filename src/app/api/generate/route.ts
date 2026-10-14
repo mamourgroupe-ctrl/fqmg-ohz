@@ -15,6 +15,7 @@ import { z } from "zod";
 const VALIDATION_PROMPT = `You are a prompt classifier for a motion graphics generation tool.
 
 Determine if the user's prompt is asking for motion graphics/animation content that can be created as a React/Remotion component.
+Use a high-recall interpretation: answer true when the prompt requests, describes, or plausibly implies visual or animated content. A request phrased as a question (for example, "Can you make an animation?") is still valid. If the intent is ambiguous, answer true.
 
 VALID prompts include requests for:
 - Animated text, titles, or typography
@@ -32,13 +33,13 @@ VALID prompts include requests for:
 - Any visual/animated content
 
 INVALID prompts include:
-- Questions (e.g., "What is 2+2?", "How do I...")
+- Clearly informational questions unrelated to creating visual content (e.g., "What is 2+2?", "How do I reset my password?")
 - Requests for text/written content (poems, essays, stories, code explanations)
 - Conversations or chat
 - Non-visual tasks (calculations, translations, summaries)
 - Requests completely unrelated to visual content
 
-Return true if the prompt is valid for motion graphics generation, false otherwise.`;
+Return false only when the prompt is clearly unrelated to creating visual or animated content.`;
 
 const SYSTEM_PROMPT = `
 You are an expert in generating React components for Remotion animations.
