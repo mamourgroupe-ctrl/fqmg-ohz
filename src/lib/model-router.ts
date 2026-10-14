@@ -27,7 +27,37 @@ export interface ModelEntry {
 }
 
 function getDefaultChain(): string {
-  return "ollama:qwen2.5-coder:7b,openrouter:openrouter/free,ollama:qwen2.5-coder:1.5b";
+  return "ollama:qwen2.5-coder:1.5b,openrouter:openrouter/free,ollama:hf.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M";
+}
+
+function inferProvider(model: string): string | undefined {
+  if (model.startsWith("claude-")) return "anthropic";
+  if (model.startsWith("qwen2.5-coder:") || model.startsWith("hf.co/")) {
+    return "ollama";
+  }
+  if (model.startsWith("gpt-") || model.startsWith("o1")) return "azure";
+  if (model.includes("/")) return "openrouter";
+  if (model.includes(":")) return "ollama";
+  return undefined;
+}
+
+function getSafeFailureMessage(error: unknown): string {
+  let message = error instanceof Error ? error.message : "Unknown error";
+  const secrets = Object.entries(process.env)
+    .filter(([name, value]) => value && /(API_KEY|TOKEN|SECRET)/i.test(name))
+    .map(([, value]) => value!)
+    .sort((left, right) => right.length - left.length);
+
+  for (const secret of secrets) {
+    message = message.split(secret).join("[REDACTED]");
+  }
+
+  return message
+    .replace(/(Bearer\s+)[^\s,;]+/gi, "$1[REDACTED]")
+    .replace(/((?:api[_-]?key|token|secret)[=:]\s*)[^\s&,;]+/gi, "$1[REDACTED]")
+    .replace(/\bsk-(?:or-)?[A-Za-z0-9_-]{8,}\b/g, "[REDACTED]")
+    .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, "$1[REDACTED]@")
+    .slice(0, 500);
 }
 
 export function getModelChain(preferredModel?: string): ModelEntry[] {
@@ -47,19 +77,28 @@ export function getModelChain(preferredModel?: string): ModelEntry[] {
       return { provider, model, fullName: item };
     });
 
-  if (preferredModel && preferredModel.length > 0) {
-    const exists = entries.some((e) => e.model === preferredModel);
-    if (!exists) {
-      let provider = "openrouter";
-      if (preferredModel.startsWith("claude-")) provider = "anthropic";
-      else if (preferredModel.startsWith("qwen2.5-coder")) provider = "ollama";
-      else if (preferredModel.startsWith("gpt-") || preferredModel.startsWith("o1")) provider = "azure";
-      entries.unshift({
-        provider,
-        model: preferredModel,
-        fullName: `${provider}:${preferredModel}`,
-      });
-    }
+  if (preferredModel) {
+    const matchingEntries = entries.filter((entry) => entry.model === preferredModel);
+    const inferredProvider = inferProvider(preferredModel);
+    const existingEntry = matchingEntries[0];
+    const preferredEntry = existingEntry
+      ? inferredProvider && existingEntry.provider !== inferredProvider
+        ? {
+            provider: inferredProvider,
+            model: preferredModel,
+            fullName: `${inferredProvider}:${preferredModel}`,
+          }
+        : existingEntry
+      : {
+          provider: inferredProvider ?? "openrouter",
+          model: preferredModel,
+          fullName: `${inferredProvider ?? "openrouter"}:${preferredModel}`,
+        };
+
+    return [
+      preferredEntry,
+      ...entries.filter((entry) => entry.model !== preferredModel),
+    ];
   }
 
   return entries;
@@ -71,8 +110,8 @@ export function hasRequiredEnvVars(provider: string): boolean {
     case "anthropic":
       return !!process.env.ANTHROPIC_API_KEY;
     case "ollama":
-      // Ollama doesn't strictly need API key, but needs base URL
-      return !!process.env.OLLAMA_BASE_URL;
+      // Ollama can use the default local endpoint.
+      return true;
     case "openrouter":
       return !!process.env.OPENROUTER_API_KEY;
     case "azure":
@@ -161,32 +200,45 @@ export async function selectWorkingModel(
     console.log(`[Router] Trying ${entry.fullName} (attempt ${attempts})...`);
 
     const startTime = Date.now();
+    const abortController = new AbortController();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
 
     try {
       const model = createModelForEntry(entry);
 
-      await generateText({
-        model,
-        prompt: "Reply with exactly: OK",
-        maxOutputTokens: 10,
-        maxRetries: 0,
-        abortSignal: AbortSignal.timeout(pingTimeout),
-      });
+      await Promise.race([
+        generateText({
+          model,
+          prompt: "Reply with exactly: OK",
+          maxOutputTokens: 10,
+          maxRetries: 0,
+          abortSignal: abortController.signal,
+        }),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => {
+            const error = new Error("Ping timeout");
+            abortController.abort(error);
+            reject(error);
+          }, pingTimeout);
+        }),
+      ]);
 
       const pingTimeMs = Date.now() - startTime;
       console.log(`[Router] ✅ Selected ${entry.fullName} (ping: ${pingTimeMs}ms)`);
       return { model, entry, attempts };
     } catch (err) {
       const pingTimeMs = Date.now() - startTime;
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = getSafeFailureMessage(err);
       console.warn(`[Router] ❌ ${entry.fullName} failed after ${pingTimeMs}ms: ${msg}`);
       continue;
+    } finally {
+      if (timeout) clearTimeout(timeout);
     }
   }
 
   if (attempts === 0) {
     throw new ModelRouterError(
-      "No AI provider is configured for the selected model chain. For Qwen via Ollama, run Ollama with the selected model and set OLLAMA_BASE_URL in .env.local to its server URL ending in /v1. For OpenRouter, set OPENROUTER_API_KEY. Use MODEL_CHAIN to configure other providers. Restart the server after changing settings. An OpenAI key is not required for Ollama.",
+      "No AI provider is configured for the selected model chain. For Qwen via Ollama, include an Ollama model in MODEL_CHAIN and run Ollama with that model. If it is not running locally, set OLLAMA_BASE_URL in .env.local to its server URL ending in /v1. For OpenRouter, set OPENROUTER_API_KEY. Use MODEL_CHAIN to configure other providers. Restart the server after changing settings. An OpenAI key is not required for Ollama.",
       "AI_NOT_CONFIGURED",
     );
   }

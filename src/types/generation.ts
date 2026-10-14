@@ -1,7 +1,10 @@
 export const MODELS = [
   // ─── Ollama (Local) ───
   { id: "qwen2.5-coder:1.5b", name: "Qwen 2.5 Coder 1.5B (Local)" },
-  { id: "qwen2.5-coder:7b",   name: "Qwen 2.5 Coder 7B (Local)" },
+  {
+    id: "hf.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M",
+    name: "Qwen 2.5 Coder 7B Q4_K_M (Ollama Local)",
+  },
   // ─── Anthropic (Official) ───
   { id: "claude-sonnet-4-5-20250929", name: "Claude Sonnet 4.5 (Anthropic)" },
   { id: "claude-opus-4-5-20250918",   name: "Claude Opus 4.5 (Anthropic)" },

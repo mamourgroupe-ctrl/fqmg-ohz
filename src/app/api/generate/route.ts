@@ -4,6 +4,7 @@ import {
   SKILL_NAMES,
   type SkillName,
 } from "@/skills";
+import { getSafeProviderErrorMessage } from "@/helpers/generation-errors";
 
 
 import { ModelRouterError, selectWorkingModel } from "@/lib/model-router";
@@ -634,12 +635,15 @@ export async function POST(req: Request) {
   try {
     routerResult = await selectWorkingModel(modelName);
   } catch (error) {
-    console.error("Model selection failed:", error);
+    // Router errors contain application-authored guidance; sanitize SDK failures.
+    const message = error instanceof ModelRouterError
+      ? error.message
+      : getSafeProviderErrorMessage(error);
+    console.error("[Generate] Model selection failed:", message);
     return Response.json(
       {
-        error: error instanceof ModelRouterError
-          ? error.message
-          : "Unable to select an AI model. Check the server configuration and try again.",
+        error: message,
+        type: "provider_unavailable",
         code: error instanceof ModelRouterError ? error.code : "AI_UNAVAILABLE",
       },
       { status: 503 },
@@ -1004,6 +1008,11 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
     // Get the original stream response
     const originalResponse = result.toUIMessageStreamResponse({
       sendReasoning: true,
+      onError: (error) => {
+        const message = getSafeProviderErrorMessage(error);
+        console.error("[Generate] Provider stream failed:", message);
+        return message;
+      },
     });
 
     // Create metadata event to prepend

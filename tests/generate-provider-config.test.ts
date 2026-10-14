@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { generateObject } from "ai";
 import { ModelRouterError, selectWorkingModel } from "@/lib/model-router";
 import { POST } from "@/app/api/generate/route";
@@ -20,7 +20,11 @@ const request = () => new Request("http://localhost/api/generate", {
   body: JSON.stringify({ prompt: "Hello", model: "qwen2.5-coder:7b" }),
 });
 
-beforeEach(() => { vi.clearAllMocks(); });
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.spyOn(console, "error").mockImplementation(() => {});
+});
+afterEach(() => { vi.restoreAllMocks(); });
 
 describe("generation provider configuration", () => {
   it("returns an actionable JSON error when no provider is configured", async () => {
@@ -31,7 +35,36 @@ describe("generation provider configuration", () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
       error: "Configure OLLAMA_BASE_URL in .env.local", code: "AI_NOT_CONFIGURED",
+      type: "provider_unavailable",
     });
+    expect(generateObject).not.toHaveBeenCalled();
+  });
+
+  it("preserves the code and guidance when configured providers are unavailable", async () => {
+    vi.mocked(selectWorkingModel).mockRejectedValueOnce(new ModelRouterError(
+      "Check the provider URL and network access.", "AI_UNAVAILABLE",
+    ));
+    const response = await POST(request());
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "Check the provider URL and network access.",
+      code: "AI_UNAVAILABLE",
+      type: "provider_unavailable",
+    });
+  });
+
+  it.each([401, undefined])("sanitizes unexpected provider errors (status %s) in responses and logs", async (statusCode) => {
+    vi.mocked(selectWorkingModel).mockRejectedValueOnce(Object.assign(
+      new Error("Provider rejected secret-api-token"), { statusCode },
+    ));
+    const response = await POST(request());
+    expect(response.status).toBe(503);
+    const payload = await response.json();
+    expect(payload).toMatchObject({ code: "AI_UNAVAILABLE", type: "provider_unavailable" });
+    expect(payload.error).toBe(statusCode === 401
+      ? "The AI provider rejected the configured account (HTTP 401). Verify the provider endpoint, account access, and selected model."
+      : "The AI provider could not complete generation. Check its availability and configuration, then retry.");
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("secret-api-token");
     expect(generateObject).not.toHaveBeenCalled();
   });
 

@@ -85,7 +85,9 @@ const PROVIDER_CONFIGS: Record<
     apiKey: env.OLLAMA_API_KEY || "ollama",
     baseURL: env.OLLAMA_BASE_URL || "http://localhost:11434/v1",
     defaultModel: env.OLLAMA_DEFAULT_MODEL || "qwen2.5-coder:1.5b",
-    fallbackModels: ["qwen2.5-coder:7b", "qwen2.5-coder:14b", "llama3.2:3b"],
+    fallbackModels: [
+      "hf.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M",
+    ],
   }),
   custom: (env) => ({
     provider: "custom",
