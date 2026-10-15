@@ -1,5 +1,5 @@
 import {
-  extractComponentCode,
+  prepareGeneratedCode,
   stripMarkdownFences,
   validateGptResponse,
 } from "@/helpers/sanitize-response";
@@ -284,8 +284,7 @@ export function useGenerationApi(): UseGenerationApiReturn {
           return;
         }
 
-          let finalCode = stripMarkdownFences(accumulatedText);
-          finalCode = extractComponentCode(finalCode);
+          const finalCode = prepareGeneratedCode(accumulatedText);
           onCodeGenerated?.(finalCode);
           onClearPendingMessage?.();
           onGenerationComplete?.(

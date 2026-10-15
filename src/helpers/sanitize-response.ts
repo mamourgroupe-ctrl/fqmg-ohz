@@ -103,3 +103,10 @@ export function extractComponentCode(code: string): string {
   // Some models append a standalone placeholder after an already closed component.
   return code.replace(/\r?\n[ \t]*\.\.\.[ \t]*\r?\n[ \t]*};[ \t]*$/, "");
 }
+
+/**
+ * Prepare a completed model response for display and validation.
+ */
+export function prepareGeneratedCode(response: string): string {
+  return extractComponentCode(stripMarkdownFences(response));
+}
