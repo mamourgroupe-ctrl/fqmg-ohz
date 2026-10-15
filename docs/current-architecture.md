@@ -1,5 +1,13 @@
 # تدقيق بنية المستودع الأصلي
 
+> **إضافة (2026-10-15):** أُضيفت دورة مراجعة بصرية وإصلاح محدود فوق المسارات الأصلية:
+> `POST /api/agent/qa`, `GET/DELETE /api/agent/qa/{jobId}`, `GET /api/agent/qa/{jobId}/preview`،
+> مع وحدات في `src/agent/` وخلفيتي عرض في `src/render/remotion/local-render-backend.ts` و
+> `src/render/lambda/lambda-render-backend.ts`. لا يوجد نظام توليد ثانٍ: نفس `/api/generate`
+> ونفس `src/remotion/entry.tsx` ونفس بوابة ffprobe. أُضيف `serverExternalPackages` إلى
+> `next.config.js` لأن حزم Remotion الخاصة بـ Node لا يمكن تجميعها داخل مسار البناء.
+> التفاصيل والحدود الأمنية والميزانية: [`visual-qa-loop.md`](visual-qa-loop.md).
+
 > **ملاحظة الدمج (2026-10-12):** هذا تقرير تدقيق تاريخي (2026-10-08). بعد الدمج لم يعد هناك مجلد
 > `fqmg-ohz-next/`: نُقل كوده إلى جذر المستودع (`src/ai`, `src/motion`, `src/render`, `src/voice`,
 > `src/remotion/entry.tsx`, `tests/`, `scripts/`, `docs/`, `templates/`)، وحُذف المجلد الفرعي بعد

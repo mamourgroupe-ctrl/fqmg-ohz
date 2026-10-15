@@ -118,8 +118,13 @@ Open: http://localhost:3000
 | `GET /api/voice/providers` | Sanitized provider configuration/health and bounded voice inventory |
 | `POST /api/voice/synthesize` | Voice synthesis; optionally attaches the audio to a Motion Specification |
 | `GET /api/voice/audio/{uuid}` | Serves locally managed audio through an opaque reference |
+| `POST /api/agent/qa` | Starts a background render-and-review job (202 + job id; never reports success) |
+| `GET /api/agent/qa/{jobId}` | Polls the validated public job view (status, stage, verdict, artifact reference) |
+| `DELETE /api/agent/qa/{jobId}` | Cancels a running job |
+| `GET /api/agent/qa/{jobId}/preview` | Streams a retained local preview through an opaque path (never a filesystem path) |
 
-Details, limits, and the deployment boundary: [`docs/voice-api.md`](docs/voice-api.md).
+Details, limits, and the deployment boundary: [`docs/voice-api.md`](docs/voice-api.md) and
+[`docs/visual-qa-loop.md`](docs/visual-qa-loop.md).
 
 ---
 
@@ -130,9 +135,11 @@ fqmg-ohz/
 ├── src/app/                 # Next.js App Router (UI + /api/generate, /api/plan, /api/voice/*)
 ├── src/components/          # Chat, editor, player UI (original)
 ├── src/hooks/               # Conversation / generation state (original)
+├── src/agent/               # Visual QA + bounded repair loop (rules, frames, critique, budget, jobs)
 ├── src/ai/                  # DirectorProvider + scene planner (Phase 1, local rules)
 ├── src/motion/              # Motion Specification Zod schemas
 ├── src/render/              # Aspect-ratio presets, RenderJob, Remotion adapter + composition
+│                            # (local + Lambda render backends for the QA loop)
 ├── src/voice/               # Voice contracts, provider adapters, routing, cache, pins, API schemas
 ├── src/remotion/            # DynamicComp root (index.ts) and FQMG-OHZ-Preview entry (entry.tsx)
 ├── src/lambda/              # Remotion Lambda client helpers (original)
@@ -174,7 +181,7 @@ projects fail closed.
 ## Quality gates
 
 ```bash
-npm test          # Vitest, tests/ (119 tests across 15 files at the time of the merge)
+npm test          # Vitest, tests/ (216 tests across 22 files before the visual QA loop landed)
 npm run typecheck
 npm run lint
 npm run build
@@ -184,6 +191,7 @@ npm run build
 
 ## Documentation
 
+- [`docs/visual-qa-loop.md`](docs/visual-qa-loop.md) — Render → ffprobe → frames → critique → repair loop, trust boundary, budget controls, verification status
 - [`docs/voice-api.md`](docs/voice-api.md) — Voice/plan API surface, environment, storage, limits
 - [`docs/phase-1-architecture.md`](docs/phase-1-architecture.md) — Phase 1 architecture boundaries
 - [`docs/phase-2-plan.md`](docs/phase-2-plan.md) — Phase 2 compatibility audit and implementation
@@ -194,7 +202,9 @@ npm run build
 > **Deployment boundary:** there is no user authentication, authorization, or distributed rate
 > limiting yet. Do not expose `POST /api/voice/synthesize` publicly with provider credentials before
 > those controls exist. The local voice cache and voice pins are single-instance filesystem state,
-> not durable storage.
+> not durable storage. The same applies to `POST /api/agent/qa`: its job registry and budget ledger
+> are process-local (single instance, lost on restart), and the daily ceiling is not a distributed
+> limiter that can bound a provider's invoice.
 
 ---
 

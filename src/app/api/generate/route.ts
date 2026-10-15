@@ -4,6 +4,7 @@ import {
   SKILL_NAMES,
   type SkillName,
 } from "@/skills";
+import { getMotionRulesPromptSection } from "@/agent/motion-rules";
 import { getSafeProviderErrorMessage } from "@/helpers/generation-errors";
 import { isExplicitArabicAnimationRequest } from "@/helpers/prompt-validation";
 
@@ -751,9 +752,18 @@ export async function POST(req: Request) {
 
   // Load skill-specific content only for NEW skills (previously used skills are already in context)
   const skillContent = getCombinedSkillContent(newSkills as SkillName[]);
-  const enhancedSystemPrompt = skillContent
-    ? `${SYSTEM_PROMPT}\n\n## SKILL-SPECIFIC GUIDANCE\n${skillContent}`
-    : SYSTEM_PROMPT;
+  // MOTION_RULES is the single motion-quality policy, shared with the visual critique rubric
+  // (src/agent/motion-rules.ts). It is appended to the existing generation prompt instead of
+  // introducing a second generation system.
+  const motionRulesSection = getMotionRulesPromptSection();
+  const enhancedSystemPrompt = [
+    SYSTEM_PROMPT,
+    motionRulesSection,
+    skillContent ? `## SKILL-SPECIFIC GUIDANCE\n${skillContent}` : "",
+  ]
+    .filter((section) => section.length > 0)
+    .join("\n\n");
+  const followUpSystemPrompt = `${FOLLOW_UP_SYSTEM_PROMPT}\n\n${motionRulesSection}`;
 
   // FOLLOW-UP MODE: Use non-streaming generateObject for faster edits
   if (isFollowUp && currentCode) {
@@ -892,7 +902,7 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
       const editResult = await generateObject({
         model: selectedModel,
         maxOutputTokens: 16000,
-        system: FOLLOW_UP_SYSTEM_PROMPT,
+        system: followUpSystemPrompt,
         messages: editMessages,
         schema: FollowUpResponseSchema,
       });
