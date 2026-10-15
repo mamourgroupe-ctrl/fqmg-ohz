@@ -221,6 +221,7 @@ function GeneratePageContent() {
   // Handle message sent for history
   const handleMessageSent = useCallback(
     (promptText: string, attachedImages?: string[]) => {
+      setErrorCorrection(null);
       addUserMessage(promptText, attachedImages);
     },
     [addUserMessage],
@@ -252,8 +253,6 @@ function GeneratePageContent() {
     if (streaming) {
       setGenerationError(null);
       setRuntimeError(null);
-      // Reset error correction state for fresh retry attempts
-      setErrorCorrection(null);
     }
   }, []);
 

@@ -9,9 +9,29 @@ export interface ValidationResult {
  */
 export function stripMarkdownFences(code: string): string {
   let result = code;
-  result = result.replace(/^```(?:tsx?|jsx?)?\n?/, "");
-  result = result.replace(/\n?```\s*$/, "");
-  return result.trim();
+  const openingFence = /```(?:tsx?|jsx?)?[ \t]*\r?\n/i.exec(result);
+
+  if (openingFence?.index !== undefined) {
+    const contentStart = openingFence.index + openingFence[0].length;
+    const closingFence = result.indexOf("```", contentStart);
+    result = result.slice(
+      contentStart,
+      closingFence === -1 ? undefined : closingFence,
+    );
+  }
+
+  const lines = result.trimEnd().split(/\r?\n/);
+  while (lines.length > 0 && ["```", "---"].includes(lines.at(-1)!.trim())) {
+    lines.pop();
+  }
+
+  return lines
+    .join("\n")
+    .replace(
+      /^([ \t]*)default[ \t]+([A-Za-z_$][\w$]*);?[ \t]*$/gm,
+      "$1export default $2;",
+    )
+    .trim();
 }
 
 /**

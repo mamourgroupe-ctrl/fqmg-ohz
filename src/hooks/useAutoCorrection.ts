@@ -38,6 +38,22 @@ interface AutoCorrectionConfig {
   onClearErrorCorrection: () => void;
 }
 
+export function getNextCorrectionAttempt(
+  error: string,
+  errorCorrection: ErrorCorrectionContext | null,
+  maxAttempts: number,
+): number | null {
+  const previousAttempts = errorCorrection?.attemptNumber ?? 0;
+  const repeatedErrorAttempts =
+    errorCorrection?.error === error ? previousAttempts : 0;
+
+  if (previousAttempts >= maxAttempts || repeatedErrorAttempts >= 2) {
+    return null;
+  }
+
+  return previousAttempts + 1;
+}
+
 /**
  * Hook to handle auto-correction of AI-generated code errors.
  * Tracks whether errors are from AI or user edits, and only auto-corrects AI errors.
@@ -88,7 +104,17 @@ export function useAutoCorrection({
       code.trim() &&
       shouldAutoCorrect()
     ) {
-      const nextAttempt = (errorCorrection?.attemptNumber ?? 0) + 1;
+      const nextAttempt = getNextCorrectionAttempt(
+        compilationError,
+        errorCorrection,
+        maxAttempts,
+      );
+      if (nextAttempt === null) {
+        console.warn(
+          "Stopping auto-correction after repeated or exhausted compilation errors.",
+        );
+        return;
+      }
       console.log(
         `Auto-correction attempt ${nextAttempt}/${maxAttempts} for compilation error:`,
         compilationError,
@@ -126,7 +152,13 @@ export function useAutoCorrection({
       generationError.type !== "truncated" &&
       shouldAutoCorrect()
     ) {
-      const nextAttempt = (errorCorrection?.attemptNumber ?? 0) + 1;
+      const nextAttempt = getNextCorrectionAttempt(
+        generationError.message,
+        errorCorrection,
+        maxAttempts,
+      );
+      if (nextAttempt === null) return;
+
       console.log(
         `Auto-retry attempt ${nextAttempt}/${maxAttempts} for generation error:`,
         generationError.message,
