@@ -93,6 +93,7 @@
     "render": "remotion render src/remotion/index.ts",
     "bundle:remotion": "remotion bundle src/remotion/entry.tsx",
     "render:preview": "remotion render src/remotion/entry.tsx FQMG-OHZ-Preview renders/phase-one-preview.mp4",
+    "agent:frame-smoke": "tsx scripts/agent-frame-smoke.mts",
     "voice:live-check": "tsx scripts/voice-live-check.ts",
     "voice:live-check:plan": "tsx scripts/voice-live-check.ts --plan",
     "deploy": "node deploy.mjs"
