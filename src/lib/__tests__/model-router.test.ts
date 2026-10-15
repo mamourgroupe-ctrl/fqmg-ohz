@@ -352,6 +352,47 @@ describe("selectWorkingModel", () => {
     );
   });
 
+  it("uses the configurable Ollama ping timeout for slow local model startup", async () => {
+    process.env.MODEL_CHAIN = "ollama:qwen2.5-coder:1.5b";
+    process.env.OLLAMA_PING_TIMEOUT_MS = "60000";
+    vi.useFakeTimers();
+    generateTextMock.mockImplementation(
+      ({ abortSignal }: { abortSignal: AbortSignal }) =>
+        new Promise((_, reject) => {
+          abortSignal.addEventListener(
+            "abort",
+            () => reject(abortSignal.reason),
+            { once: true },
+          );
+        }),
+    );
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const selection = expect(
+      selectWorkingModel("qwen2.5-coder:1.5b"),
+    ).rejects.toThrow(/No working model is available/i);
+    await vi.advanceTimersByTimeAsync(59999);
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await selection;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("rejects invalid Ollama ping timeout configuration", async () => {
+    process.env.MODEL_CHAIN = "ollama:qwen2.5-coder:1.5b";
+    process.env.OLLAMA_PING_TIMEOUT_MS = "not-a-timeout";
+
+    await expect(
+      selectWorkingModel("qwen2.5-coder:1.5b"),
+    ).rejects.toMatchObject({
+      name: "ModelRouterError",
+      code: "AI_NOT_CONFIGURED",
+      message:
+        "OLLAMA_PING_TIMEOUT_MS must be a positive integer number of milliseconds.",
+    });
+    expect(generateTextMock).not.toHaveBeenCalled();
+  });
+
   it("throws when all providers are missing required configuration", async () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OPENROUTER_API_KEY;

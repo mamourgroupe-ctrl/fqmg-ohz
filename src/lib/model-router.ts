@@ -23,6 +23,8 @@ export interface ModelFailureDiagnostic {
   status?: number;
 }
 
+const DEFAULT_OLLAMA_PING_TIMEOUT_MS = 120000;
+
 export class ModelRouterError extends Error {
   readonly code: string;
 
@@ -60,6 +62,20 @@ export class ModelSelectionError extends ModelRouterError {
     this.failures = failures;
     this.publicMessage = publicMessage;
   }
+}
+
+function getOllamaPingTimeoutMs(): number {
+  const configuredTimeout = process.env.OLLAMA_PING_TIMEOUT_MS?.trim();
+  if (!configuredTimeout) return DEFAULT_OLLAMA_PING_TIMEOUT_MS;
+
+  const timeout = Number(configuredTimeout);
+  if (!Number.isSafeInteger(timeout) || timeout <= 0) {
+    throw new ModelRouterError(
+      "OLLAMA_PING_TIMEOUT_MS must be a positive integer number of milliseconds.",
+      "AI_NOT_CONFIGURED",
+    );
+  }
+  return timeout;
 }
 
 function getDefaultChain(): string {
@@ -254,7 +270,6 @@ export async function selectWorkingModel(
   } = {},
 ): Promise<{ model: LanguageModel; entry: ModelEntry; attempts: number }> {
   const chain = getModelChain(preferredModel);
-  const pingTimeout = options.pingTimeoutMs ?? 30000;
   const excludedModels = new Set(options.excludedModels ?? []);
   let attempts = 0;
   const failures: ModelFailureDiagnostic[] = [];
@@ -276,6 +291,9 @@ export async function selectWorkingModel(
     attempts++;
     console.log(`[Router] Trying ${entry.fullName} (attempt ${attempts})...`);
 
+    const pingTimeout =
+      options.pingTimeoutMs ??
+      (entry.provider === "ollama" ? getOllamaPingTimeoutMs() : 30000);
     const startTime = Date.now();
     const abortController = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
