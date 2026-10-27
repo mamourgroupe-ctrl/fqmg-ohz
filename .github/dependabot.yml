@@ -1,0 +1,31 @@
+# Weekly automated dependency updates (Phase 1).
+#
+# REVIEW NOTES (docs/decisions.md D-007/D-008/D-009):
+# - zod, dompurify, and @ai-sdk/provider-utils are force-pinned via `overrides`
+#   in package.json because upstreams pin them exactly (@remotion/studio-protocol
+#   pins zod; monaco-editor pins dompurify). A Dependabot bump of the parent
+#   package will not move the overridden child — check
+#   tests/dependency-security-policy.test.ts still passes.
+# - The ai-sdk chain (ai, @ai-sdk/react, @ai-sdk/gateway) is pinned inside
+#   documented advisory-safe windows; "latest" may be inside a newly published
+#   vulnerable range. Update the pin AND the policy test together, citing the
+#   advisory ranges current at that date.
+
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
