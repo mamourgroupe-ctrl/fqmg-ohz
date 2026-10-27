@@ -41,7 +41,7 @@
     "clsx": "2.1.1",
     "google-auth-library": "^11.3.1",
     "lottie-web": "^5.13.0",
-    "lucide-react": "0.555.0",
+    "lucide-react": "1.61.0",
     "monaco-editor": "0.56.0",
     "monaco-jsx-syntax-highlight": "1.2.2",
     "next": "16.4.1",
