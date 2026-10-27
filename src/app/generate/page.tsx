@@ -12,7 +12,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { AnimationPlayer } from "../../components/AnimationPlayer";
+import { SandboxedPreview, type SandboxedPreviewHandle } from "../../sandbox/SandboxedPreview";
 import { ChatSidebar, type ChatSidebarRef } from "../../components/ChatSidebar";
 import { CodeEditor } from "../../components/CodeEditor";
 import { PageLayout } from "../../components/PageLayout";
@@ -122,12 +122,26 @@ function GeneratePageContent() {
 
   const {
     code,
-    Component,
+    transpiled,
     error: compilationError,
     isCompiling,
     setCode,
     compileCode,
   } = useAnimationState(examples[0]?.code || "");
+
+  // Phase 4: frame capture runs INSIDE the sandbox iframe (renderStill on the
+  // opaque-origin frame), never via a live component in this context.
+  const sandboxPreviewRef = useRef<SandboxedPreviewHandle>(null);
+  const captureFrameInSandbox = useCallback(
+    (frame: number) => {
+      const handle = sandboxPreviewRef.current;
+      if (!handle) {
+        return Promise.reject(new Error("sandboxed preview is not ready"));
+      }
+      return handle.captureFrame(frame);
+    },
+    [],
+  );
 
   // Runtime errors from the Player (e.g., "cannot access variable before initialization")
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
@@ -325,10 +339,8 @@ function GeneratePageContent() {
           errorCorrection={errorCorrection ?? undefined}
           onPendingMessage={setPendingMessage}
           onClearPendingMessage={clearPendingMessage}
-          // Frame capture props
-          Component={Component}
-          fps={fps}
-          durationInFrames={durationInFrames}
+          // Phase 4: capture is sandbox-mediated (see captureFrameInSandbox)
+          captureFrameRequest={captureFrameInSandbox}
           currentFrame={currentFrame}
         />
 
@@ -348,8 +360,9 @@ function GeneratePageContent() {
                 key={code}
                 onError={(error) => handleRuntimeError(error.message)}
               >
-                <AnimationPlayer
-                  Component={generationError ? null : Component}
+                <SandboxedPreview
+                  ref={sandboxPreviewRef}
+                  transpiled={generationError ? null : transpiled}
                   durationInFrames={durationInFrames}
                   fps={fps}
                   onDurationChange={setDurationInFrames}
@@ -359,8 +372,6 @@ function GeneratePageContent() {
                   isCompiling={isCompiling}
                   isStreaming={isStreaming}
                   error={generationError?.message || codeError}
-                  errorType={generationError?.type || "compilation"}
-                  code={code}
                   onRuntimeError={handleRuntimeError}
                   onFrameChange={setCurrentFrame}
                 />
