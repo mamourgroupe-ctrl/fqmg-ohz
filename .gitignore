@@ -25,6 +25,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# log files (e.g. tailwind/turbopack stray logs)
+*.log
+
 # local env files
 .env*.local
 
