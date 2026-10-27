@@ -11,7 +11,7 @@
   },
   "homepage": "https://www.remotion.dev",
   "dependencies": {
-    "@ai-sdk/anthropic": "^2.0.91",
+    "@ai-sdk/anthropic": "^4.0.88",
     "@ai-sdk/azure": "^2.0.121",
     "@ai-sdk/openai": "2.0.116",
     "@ai-sdk/react": "2.0.224",
