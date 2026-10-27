@@ -199,12 +199,16 @@ npm run build
 - [`docs/current-architecture.md`](docs/current-architecture.md) — audit of the original project
 - [`docs/artcraft-integration-assessment.md`](docs/artcraft-integration-assessment.md) — why ArtCraft (Rust/Tauri desktop IDE) cannot be merged as code, and the Omni-API provider option
 
-> **Deployment boundary:** there is no user authentication, authorization, or distributed rate
-> limiting yet. Do not expose `POST /api/voice/synthesize` publicly with provider credentials before
-> those controls exist. The local voice cache and voice pins are single-instance filesystem state,
-> not durable storage. The same applies to `POST /api/agent/qa`: its job registry and budget ledger
-> are process-local (single instance, lost on restart), and the daily ceiling is not a distributed
-> limiter that can bound a provider's invoice.
+> **Deployment boundary (updated in phase 3):** every API route now requires a signed
+> session (`POST /api/auth/login` against `FQMG_USERS`), per-resource ownership is
+> enforced (403 for cross-user access), per-user rate limits return 429 with
+> `Retry-After`, and each user gets their own daily budget ceiling on top of the global
+> daily cap — see [`docs/api-access.md`](docs/api-access.md) for the full route ×
+> identity × rate table. `AUTH_ENABLED=0` is a documented local-development escape.
+> Still single-instance: the rate-limit counters and budget ledger are process-local
+> memory (correct for one instance; multiple replicas need the phase-5 Redis store),
+> the voice cache/job store are filesystem state, and a browser login UI is planned
+> for phase 8.
 
 ---
 

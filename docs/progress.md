@@ -160,3 +160,42 @@
 3. التغطية مقيسة بلا عتبات؛ فرضها مؤجل إلى المرحلة 8 عن قصد.
 4. كل المراحل تتراكم على فرع الجلسة الواحد بدل فرع لكل مرحلة (قيد منصة Arena — D-001)؛
    PR #5 مسودة وستراكم المراحل القادمة commits، والمراجعة البشرية للمرحلتين 3 و4 تبقى إلزامية.
+
+## المرحلة 3 — مكتملة (بانتظار مراجعة بشرية قبل الدمج ⚠️)
+
+**بوابات الجودة (فعلية، محليًا):** `npm test` → **424/424** (44 ملفًا؛ كان 395)،
+`npm run typecheck` → 0، `npm run lint` → 0، `npm run build` → 0، تدقيق الإنتاج → 0.
+
+**ما نُفذ:**
+1. بوابة خارجية `src/proxy.ts` (بديل middleware في Next 16): كل `/api/*` تتطلب جلسة
+   موقّعة؛ العامة = login/logout فقط؛ `ip-global` 120/د لكل IP قبل فحص الجلسة.
+2. نواة `src/auth/`: `session.ts` (HMAC كوكي موقّع، `FQMG_USERS` scrypt، `requireUser()`،
+   فشل مغلق بلا `AUTH_SECRET`)، `rate-limit.ts` (10 سياسات لكل مستخدم/IP عبر واجهة
+   `RateLimitStore`، `__resetRateLimitsForTests()`)، `guard.ts` (`authenticateApiRequest`
+   + `forbiddenResponse()`)، `ownership.ts`.
+3. تسجيل الدخول/الخروج: `POST /api/auth/login` (حد 5/5د لكل IP، رسالة عامة واحدة،
+   كوكي HttpOnly/Lax/Secure-في-الإنتاج، 12 ساعة) و`POST /api/auth/logout`.
+4. كل مسار API مدفوع/حساس محمي: generate، plan، voice×3، qa POST/GET/DELETE/preview،
+   lambda render/progress (عبر `executeApi` بمصادقة قبل قراءة الجسم + `ratePolicy`).
+5. تفويض لكل مورد: مهام QA مملوكة (403 للمستخدم الآخر)، المعاينة تتحقق قبل كشف الوجود،
+   الصوت fail-closed لمرجع بلا مالك، dedupe الـ qa لكل مستخدم.
+6. ميزانية لكل مستخدم: `AGENT_USER_DAILY_BUDGET_USD` (افتراضي = السقف العام) مع
+   حجز/تسوية/استرداد لكل مهمة تحمل `user`.
+7. `.env.example` موثّق، `npm run auth:hash`، README محدّث، `docs/api-access.md`
+   (جدول المسارات × الهوية × الحدود)، D-017..D-020.
+
+**الاختبارات الجديدة (كتبت حمراء أولًا):** `tests/api-auth.test.ts` (18)،
+`tests/api-authorization.test.ts` (4)، `tests/api-rate-limit.test.ts` (4)،
+`tests/agent-budget-per-user.test.ts` (3)، `tests/api-proxy.test.ts` (4) = 29 اختبارًا.
+إجمالي 395 → 424 (لا يوجد اختبار محذوف). أُثبت: 401 بلا جلسة/بكوكي مزيّف، 403 عابر
+للمستخدمين (حالة/إلغاء/معاينة/صوت)، 429 + `Retry-After` + تصفير النافذة + عزل
+المستخدمين/IPs، رفض الميزانية لكل مستخدم دون المساس بحصة الآخرين، فشل مغلق
+(`AUTH_SECRET` مفقود، صوت بلا مالك).
+
+**ملاحظات معمارية:** (أ) تعطيل `AUTH_ENABLED=0` يلغي المصادقة والتفويض وحد المعدل
+معًا (D-018)؛ (ب) الحد والميزانية process-local — المرحلة 5 تستبدل المخزن بـ Redis
+(D-019)؛ (ج) next-auth@beta رُفض لصالح جلسات داخلية (D-017) — **قرار يحتاج موافقة
+المالك**؛ (د) لا صفحة دخول في الواجهة بعد (المرحلة 8).
+
+**⚠️ مطلوب مراجعة بشرية صريحة قبل الدمج (شرط المرحلة 3):** راجع خصوصًا
+`src/auth/session.ts` و`src/proxy.ts` و`docs/api-access.md` وD-017.
