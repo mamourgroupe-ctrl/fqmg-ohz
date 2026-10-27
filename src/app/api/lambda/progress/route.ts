@@ -41,4 +41,6 @@ export const POST = executeApi<ProgressResponse, typeof ProgressRequest>(
       progress: Math.max(0.03, renderProgress.overallProgress),
     };
   },
+  // A progress poll is two short strings; anything bigger is invalid.
+  { maxBodyBytes: 16 * 1024 },
 );

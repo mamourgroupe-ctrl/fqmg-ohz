@@ -55,4 +55,6 @@ export const POST = executeApi<RenderMediaOnLambdaOutput, typeof RenderRequest>(
 
     return result;
   },
+  // inputProps carries the generated component code: small, but bounded.
+  { maxBodyBytes: 64 * 1024 },
 );

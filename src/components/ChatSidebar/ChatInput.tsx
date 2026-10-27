@@ -172,7 +172,7 @@ export function ChatInput({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/png,image/jpeg"
             multiple
             onChange={handleFileSelect}
             className="hidden"

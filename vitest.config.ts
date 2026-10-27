@@ -1,7 +1,23 @@
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vitest/config";
+import { defineConfig, type Plugin } from "vitest/config";
+
+/**
+ * Matches the Next.js config, where *.md is loaded as raw source (raw-loader /
+ * asset-source). Route modules import markdown through @/skills, so tests that
+ * import those routes need the same behavior under Vitest.
+ */
+const rawMarkdown: Plugin = {
+  name: "raw-markdown",
+  transform(code, id) {
+    if (id.split("?")[0].endsWith(".md")) {
+      return { code: `export default ${JSON.stringify(code)};`, map: null };
+    }
+    return undefined;
+  },
+};
 
 export default defineConfig({
+  plugins: [rawMarkdown],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
