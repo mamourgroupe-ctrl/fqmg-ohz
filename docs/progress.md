@@ -26,7 +26,7 @@
 | `package.json` + `package-lock.json` | `zod ^4.6.7`، `monaco-editor 0.56.0`، `ai 5.0.222`، `@ai-sdk/react 2.0.224`، `@ai-sdk/openai 2.0.116`، `google-auth-library ^11.3.1`، و`overrides` إلزامية (`zod ^4.6.7`, `dompurify 3.4.17`, `@ai-sdk/provider-utils 3.0.30`) |
 | `tests/dependency-security-policy.test.ts` | جديد (7 اختبارات): يجمّد النوافذ الآمنة ويمنع التراجع — فشل 6/7 فعليًا على lockfile ما قبل المرحلة |
 | `.github/workflows/ci.yml` | بوابة audit أصبحت إلزامية (`--audit-level=high` يفشل البناء) — نهاية وضع التحذير من المرحلة 0 |
-| `.github/dependabot.yml` | جديد: npm + github-actions أسبوعيًا، مع تنبيه مراجعة للسلاسل المثبّتة |
+| `.github/dependabot.yml` | جديد: npm + github-actions أسبوعيًا، مع تنبيه مراجعة للسلاسل المثبّتة. **ملاحظة تفعيل:** GitHub يتطلب وجود `dependabot.yml` على الفرع الافتراضي — سيعمل فعليًا بعد دمج PR #5 في `main` |
 | `docs/audit-before.md` / `docs/audit-after.md` | سجل كامل قبل/بعد + تحليل التعارض + انزياح التنبيهات + ما لم يُتحقق |
 
 ### النتيجة الأمنية
