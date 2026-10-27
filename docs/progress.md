@@ -199,3 +199,59 @@
 
 **⚠️ مطلوب مراجعة بشرية صريحة قبل الدمج (شرط المرحلة 3):** راجع خصوصًا
 `src/auth/session.ts` و`src/proxy.ts` و`docs/api-access.md` وD-017.
+
+## المرحلة 4 — مكتملة (بانتظار مراجعة بشرية قبل الدمج ⚠️)
+
+**بوابات الجودة (فعلية، محليًا):** `npm test` → **476/476** (46 ملفًا؛ كان 428)،
+`npm run typecheck` → 0، `npm run lint` → 0، `npm run build` → 0 (14 صفحة)،
+تدقيق الإنتاج → 0. الاعتماديات: **صفر تغيير** (package.json/package-lock
+مطابقان للمرحلة 3).
+
+**ما نُفذ:**
+1. بوابة تحقق AST فاشلة-مغلقة `src/sandbox/code-validator.ts` — قائمة بيضاء
+   للمعرفات (حقن React/Remotion + builtins حتمية + أنواع TS)، رفض
+   `import()`/import/with، رفض أسماء أعضاء الهروب (constructor/__proto__/
+   prototype/caller/callee)، رفض الوصول المحسوب غير الحرفي، رفض الإسناد
+   لمعرف عالمي. تُعيد مخالفات (kind:name) بلا مقاطع شيفرة خام.
+2. عقد الإطار `src/sandbox/iframe-sandbox.ts` — `sandbox="allow-scripts"` بلا
+   `allow-same-origin`، ثابت CSP بلا شبكة، حارس بنيوي للرسائل (أنواع معلومة،
+   حقول مضبوطة، رفض __proto__/constructor)، و`isTrustedSandboxEvent` (الأصل
+   "null" فقط + المصدر = نافذة الإطار).
+3. جسر بحقن التبعيات `src/sandbox/sandbox-bridge.ts` — كلب مهلة readiness،
+   جلسات (بدء/موت/تجاهل الرسائل المتأخرة)، وقناة التقاط إطار بمعرفات مرتبطة
+   ومهلة مستقلة.
+4. `src/sandbox/SandboxedPreview.tsx` (الأب) + `src/app/preview-sandbox`
+   (داخل الإطار: تقييم + Player + التقاط عبر renderStillOnWeb داخل المعزول) +
+   `src/sandbox/sandbox-runtime.ts` (بوابة التقييم: تحقق → ترجمة → تقييم).
+5. إزالة التنفيذ من سياق الصفحة: useAnimationState يترجم فقط (بلا new
+   Function)، /generate و/code-examples عبر SandboxedPreview، التقاط الإطار
+   للشات صار طلبًا داخل المعزول (ChatSidebar/ChatInput)، AnimationPlayer
+   موسوم legacy وغير مستخدم، وترويسة CSP في next.config.js لـ /preview-sandbox
+   (اختبار يزامنها مع الثابت).
+6. compiler.ts: `transpileGeneratedCode` (تحقق+ترجمة بيانات فقط) + تقييم موحد
+   `evaluateTranspiled`؛ compileCode (سياق العرض فقط) صار خلف البوابة وموسومًا.
+
+**الاختبارات الجديدة (حمراء أولًا — 0 موجودة قبل الوحدات):**
+`tests/generated-code-sandbox.test.ts` = **48 اختبارًا**: 21 عينة هجوم
+(document.cookie، fetch خارجي، XHR، WebSocket، localStorage/sessionStorage،
+window.parent/top/opener، eval، Function، import() الديناميكي، import statement،
+with، هروب constructor/المحسوب، إسناد عالمي، globalThis، navigator، indexedDB)
+كلها تُرفض قبل التنفيذ مع اسم المخالفة؛ الشيفرة السليمة تعمل؛ لا تسريب مقاطع
+مصدر في المخالفات؛ القائمة البيضاء بلا فتحات هروب؛ عقد الإطار (بلا
+allow-same-origin، CSP بلا شبكة وunsafe-eval محصور بالمعزول)؛ حارس الرسائل
+يرفض الوظائف/الأنواع الخاطئة/المفاتيح العدائية؛ الأصل غير "null" أو مصدر مغاير
+يُهمَل؛ الكلب يموت بعد المهلة ويتجاهل المتأخرات؛ الالتقاط يرتبط بالمعرف
+ويفشل بمهلة؛ بوابة التقييم ترفض `globalThis.__fqmg_pwned` دون تنفيذه؛
+تطابق CSP بين next.config.js والثابت. **الإجمالي 428 → 476 (لا اختبار محذوف).**
+
+**مختبَر فعليًا vs مستنتَج/غير مختبَر:**
+- **مختبَر آليًا:** كل ما فوق — طبقات نقية في بيئة node.
+- **مستنتَج (سلوك منصة موثق، غير مختبَر هنا):** إسكاد المتصفح للأصل المعتم
+  (لا كوكيز/تخزين/DOM-أب) وتنفيذ CSP في المتصفح — jsdom/Playwright غير
+  متاحين دون خرق سياسة الاعتماديات (D-023).
+- **غير مختبَر:** سيناريو المعاينة بصريًا في متصفح حقيقي (لا Chromium في
+  البيئة)، وجودة UX بعد التبديل — **تتطلب مراجعة يدوية**.
+
+**⚠️ مطلوب مراجعة بشرية صريحة قبل الدمج (شرط المرحلة 4):** جرّب /generate
+في متصفح حقيقي (المعاينة داخل الإطار المعزول + التقاط الإطار للشات)، وراجع
+`src/sandbox/code-validator.ts` و`src/app/preview-sandbox/page.tsx` وD-021..D-023.
