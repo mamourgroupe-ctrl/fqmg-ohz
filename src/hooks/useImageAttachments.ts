@@ -9,8 +9,13 @@ import {
 } from "react";
 
 const MAX_ATTACHED_IMAGES = 4;
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB per image
+// Must match the server-side limit (GENERATE_IMAGE_LIMITS.maxBytes in
+// src/lib/generate-request-schema.ts). The client check is UX only; the
+// server enforces the real boundary.
+const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024; // 2MB per image
 const MAX_FILE_SIZE_MB = MAX_FILE_SIZE_BYTES / (1024 * 1024);
+// Only container formats the server inspects (magic bytes + dimensions).
+const SUPPORTED_IMAGE_TYPES = new Set(["image/png", "image/jpeg"]);
 
 interface UseImageAttachmentsReturn {
   attachedImages: string[];
@@ -42,9 +47,12 @@ export function useImageAttachments(): UseImageAttachmentsReturn {
   const filterValidFiles = useCallback((files: File[]): File[] => {
     const validFiles: File[] = [];
     const oversizedFiles: File[] = [];
+    const unsupportedFiles: File[] = [];
 
     for (const file of files) {
-      if (file.size > MAX_FILE_SIZE_BYTES) {
+      if (file.type && !SUPPORTED_IMAGE_TYPES.has(file.type)) {
+        unsupportedFiles.push(file);
+      } else if (file.size > MAX_FILE_SIZE_BYTES) {
         oversizedFiles.push(file);
       } else {
         validFiles.push(file);
@@ -55,6 +63,12 @@ export function useImageAttachments(): UseImageAttachmentsReturn {
       const fileNames = oversizedFiles.map((f) => f.name).join(", ");
       setError(
         `${oversizedFiles.length === 1 ? "File" : "Files"} too large (max ${MAX_FILE_SIZE_MB}MB): ${fileNames}`,
+      );
+    }
+    if (unsupportedFiles.length > 0) {
+      const fileNames = unsupportedFiles.map((f) => f.name).join(", ");
+      setError(
+        `${unsupportedFiles.length === 1 ? "File is" : "Files are"} not supported - use PNG or JPEG: ${fileNames}`,
       );
     }
 

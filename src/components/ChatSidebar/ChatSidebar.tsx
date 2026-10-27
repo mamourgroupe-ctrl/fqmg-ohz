@@ -23,7 +23,6 @@ import {
   useImperativeHandle,
   useRef,
   useState,
-  type ComponentType,
 } from "react";
 import { ChatHistory } from "./ChatHistory";
 import { ChatInput } from "./ChatInput";
@@ -72,10 +71,9 @@ interface ChatSidebarProps {
   errorCorrection?: ErrorCorrectionContext;
   onPendingMessage?: (skills?: string[]) => void;
   onClearPendingMessage?: () => void;
-  // Frame capture props
-  Component?: ComponentType | null;
-  fps?: number;
-  durationInFrames?: number;
+  // Frame capture (phase 4): the render happens INSIDE the sandboxed preview
+  // iframe via this request function — never via a live component here.
+  captureFrameRequest?: ((frame: number) => Promise<string>) | null;
   currentFrame?: number;
 }
 
@@ -103,9 +101,7 @@ export const ChatSidebar = forwardRef<ChatSidebarRef, ChatSidebarProps>(
       errorCorrection,
       onPendingMessage,
       onClearPendingMessage,
-      Component,
-      fps = 30,
-      durationInFrames = 150,
+      captureFrameRequest,
       currentFrame = 0,
     },
     ref,
@@ -232,9 +228,7 @@ export const ChatSidebar = forwardRef<ChatSidebarRef, ChatSidebarProps>(
               onSubmit={(attachedImages) =>
                 handleGeneration({ attachedImages })
               }
-              Component={Component}
-              fps={fps}
-              durationInFrames={durationInFrames}
+              captureFrameRequest={captureFrameRequest}
               currentFrame={currentFrame}
             />
           </div>

@@ -1,5 +1,11 @@
 "use client";
 
+/**
+ * LEGACY (phase 4): this player renders a LIVE generated component in the
+ * main page context and is no longer used by /generate or /code-examples —
+ * those went through src/sandbox/SandboxedPreview (opaque-origin iframe).
+ * Kept only as a legacy surface; do not wire new screens to it.
+ */
 import { Player, type ErrorFallback, type PlayerRef } from "@remotion/player";
 import React, { useEffect, useRef } from "react";
 import { ASPECT_RATIOS, type AspectRatioId } from "@/types/generation";

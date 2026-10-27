@@ -1,4 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// This suite exercises business logic, not the auth boundary: the explicit
+// development escape keeps the handlers reachable (phase 3 covers 401/403/429
+// in tests/api-auth.test.ts, tests/api-authorization.test.ts, tests/api-rate-limit.test.ts).
+process.env.AUTH_ENABLED = "0";
 import { generateObject, streamText } from "ai";
 import { selectWorkingModel } from "@/lib/model-router";
 import { MOTION_RULES, getMotionRulesPromptSection } from "@/agent/motion-rules";

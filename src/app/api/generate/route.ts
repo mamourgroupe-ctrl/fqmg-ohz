@@ -4,10 +4,19 @@ import {
   SKILL_NAMES,
   type SkillName,
 } from "@/skills";
+import { randomUUID } from "node:crypto";
 import { getMotionRulesPromptSection } from "@/agent/motion-rules";
+import { sanitizeDiagnosticText } from "@/agent/redaction";
 import { getSafeProviderErrorMessage } from "@/helpers/generation-errors";
 import { isExplicitArabicAnimationRequest } from "@/helpers/prompt-validation";
-
+import { readBoundedJson, VoiceRequestBodyError } from "@/voice/api/read-bounded-json";
+import {
+  GenerateRequestSchema,
+  GENERATE_MAX_REQUEST_BYTES,
+  GenerateImageValidationError,
+  validateGenerateRequestImages,
+} from "@/lib/generate-request-schema";
+import { authenticateApiRequest } from "@/auth/guard";
 
 import {
   ModelRouterError,
@@ -614,6 +623,83 @@ interface GenerateResponse {
 }
 
 export async function POST(req: Request) {
+  // Phase 3: identity + per-user rate limit come before anything else.
+  const auth = authenticateApiRequest(req, "generate");
+  if (!auth.ok) return auth.response;
+
+  // Every request gets a correlation identifier: logs carry the id and lengths
+  // only, never the prompt, code, or image content (phase 2 log hygiene).
+  const requestId = randomUUID();
+
+  let body: unknown;
+  try {
+    body = await readBoundedJson(req, GENERATE_MAX_REQUEST_BYTES);
+  } catch (error) {
+    if (error instanceof VoiceRequestBodyError) {
+      if (error.kind === "too-large") {
+        return new Response(
+          JSON.stringify({
+            error: `The request body exceeds the ${Math.round(GENERATE_MAX_REQUEST_BYTES / (1024 * 1024))} MB limit.`,
+            type: "too_large",
+            requestId,
+          }),
+          { status: 413, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (error.kind === "unsupported-content-type") {
+        return new Response(
+          JSON.stringify({
+            error: "Requests must use an application/json content type.",
+            type: "unsupported_media_type",
+            requestId,
+          }),
+          { status: 415, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          error: "The request body must be valid UTF-8 JSON.",
+          type: "invalid_json",
+          requestId,
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    throw error;
+  }
+
+  const parsed = GenerateRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return new Response(
+      JSON.stringify({
+        error: "The generation request did not pass validation.",
+        type: "validation",
+        issues: parsed.error.issues.map((issue) => ({
+          path: issue.path.join("."),
+          message: issue.message,
+        })),
+        requestId,
+      }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  try {
+    validateGenerateRequestImages(parsed.data);
+  } catch (error) {
+    if (error instanceof GenerateImageValidationError) {
+      return new Response(
+        JSON.stringify({
+          error: error.message,
+          type: "validation",
+          requestId,
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    throw error;
+  }
+
   const {
     prompt,
     model = "claude-sonnet-5",
@@ -625,7 +711,7 @@ export async function POST(req: Request) {
     previouslyUsedSkills = [],
     frameImages,
     excludedModels = [],
-  }: GenerateRequest = await req.json();
+  }: GenerateRequest = parsed.data;
   const safeExcludedModels = Array.isArray(excludedModels)
     ? excludedModels
         .filter((excludedModel): excludedModel is string =>
@@ -714,7 +800,7 @@ export async function POST(req: Request) {
       }
     } catch (validationError) {
       // On validation error, allow through rather than blocking
-      console.error("Validation error:", validationError);
+      console.error("[Generate] prompt classification failed:", sanitizeDiagnosticText(String(validationError)));
     }
   }
 
@@ -731,9 +817,9 @@ export async function POST(req: Request) {
       }),
     });
     detectedSkills = skillResult.object.skills;
-    console.log("Detected skills:", detectedSkills);
+    console.log(`[Generate] requestId=${requestId} detectedSkills=${detectedSkills.length > 0 ? detectedSkills.join(",") : "none"}`);
   } catch (skillError) {
-    console.error("Skill detection error:", skillError);
+    console.error("[Generate] skill detection failed:", sanitizeDiagnosticText(String(skillError)));
   }
 
   // Filter out skills that were already used in the conversation to avoid redundant context
@@ -867,15 +953,7 @@ ${frameImages && frameImages.length > 0 ? `\n(See the attached ${frameImages.len
 Analyze the request and decide: use targeted edits (type: "edit") for small changes, or full replacement (type: "full") for major restructuring.`;
 
       console.log(
-        "Follow-up edit with prompt:",
-        prompt,
-        "model:",
-        modelName,
-        "skills:",
-        detectedSkills.length > 0 ? detectedSkills.join(", ") : "general",
-        frameImages && frameImages.length > 0
-          ? `(with ${frameImages.length} image(s))`
-          : "",
+        `[Generate] follow-up requestId=${requestId} promptLength=${prompt.length} model=${modelName} skills=${detectedSkills.length} images=${frameImages && frameImages.length > 0 ? frameImages.length : 0}`,
       );
 
       // Build messages array - include images if provided
@@ -1053,14 +1131,7 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
     });
 
     console.log(
-      "Generating React component with prompt:",
-      prompt,
-      "model:",
-      modelName,
-      "skills:",
-      detectedSkills.length > 0 ? detectedSkills.join(", ") : "general",
-      reasoningEffort ? `reasoning_effort: ${reasoningEffort}` : "",
-      hasImages ? `(with ${frameImages.length} image(s))` : "",
+      `[Generate] start requestId=${requestId} promptLength=${prompt.length} model=${modelName} skills=${detectedSkills.length}${reasoningEffort ? ` reasoning=${reasoningEffort}` : ""} images=${hasImages ? frameImages.length : 0}`,
     );
 
     // Get the original stream response
@@ -1105,6 +1176,7 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
 
     const responseHeaders = new Headers(originalResponse.headers);
     responseHeaders.set("x-generation-model", selectedEntry.fullName);
+    responseHeaders.set("x-request-id", requestId);
     return new Response(stream, {
       headers: responseHeaders,
     });

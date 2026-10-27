@@ -41,6 +41,8 @@ export const AgentConfigSchema = z.object({
   /** USD. Owner policy: USD 0.03 per task, USD 0.25 per day. */
   taskBudgetUsd: Bound(0.000001, 100, "float"),
   dailyBudgetUsd: Bound(0.000001, 10_000, "float"),
+  /** Optional per-user daily ceiling (phase 3); bounds one user's slice of the day. */
+  userDailyBudgetUsd: Bound(0.000001, 10_000, "float"),
   /** Output-token ceiling for the vision critique request. */
   critiqueMaxOutputTokens: Bound(64, 4_000),
   /** Output-token ceiling for an AI repair request. */
@@ -78,6 +80,7 @@ export const AGENT_CONFIG_DEFAULTS: AgentConfig = {
 
   taskBudgetUsd: 0.03,
   dailyBudgetUsd: 0.25,
+  userDailyBudgetUsd: 0.25,
   critiqueMaxOutputTokens: 600,
   repairMaxOutputTokens: 16_000,
 
@@ -166,6 +169,7 @@ export function loadAgentConfig(env: Environment = process.env): AgentConfig {
 
     taskBudgetUsd: readNumber(env, "AGENT_TASK_BUDGET_USD", defaults.taskBudgetUsd, "float"),
     dailyBudgetUsd: readNumber(env, "AGENT_DAILY_BUDGET_USD", defaults.dailyBudgetUsd, "float"),
+    userDailyBudgetUsd: readNumber(env, "AGENT_USER_DAILY_BUDGET_USD", defaults.userDailyBudgetUsd, "float"),
     critiqueMaxOutputTokens: readNumber(
       env,
       "AGENT_CRITIQUE_MAX_OUTPUT_TOKENS",

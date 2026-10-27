@@ -101,7 +101,11 @@ export function createAgentRuntime(env: Environment = process.env): AgentRuntime
   const config = loadAgentConfig(env);
   const priceBook = loadPriceBook(env);
   const budget = new BudgetLedger({
-    policy: { dailyLimitUsd: config.dailyBudgetUsd, taskLimitUsd: config.taskBudgetUsd },
+    policy: {
+      dailyLimitUsd: config.dailyBudgetUsd,
+      taskLimitUsd: config.taskBudgetUsd,
+      userDailyLimitUsd: config.userDailyBudgetUsd,
+    },
   });
 
   return {

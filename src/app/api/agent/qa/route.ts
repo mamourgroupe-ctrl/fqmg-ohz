@@ -11,6 +11,8 @@ import {
 } from "@/agent/api/request-schema";
 import { AgentJobCapacityError, AgentJobConflictError } from "@/agent/job-store";
 import { AgentRequestError, runAgentLoop } from "@/agent/loop";
+import { authenticateApiRequest } from "@/auth/guard";
+import { isAuthEnforced } from "@/auth/session";
 import { getAgentRuntime } from "@/agent/runtime";
 
 export const runtime = "nodejs";
@@ -35,6 +37,9 @@ function errorResponse(code: AgentQaErrorCode, message: string, status: number, 
 }
 
 export async function POST(request: Request) {
+  const auth = authenticateApiRequest(request, "agent-qa");
+  if (!auth.ok) return auth.response;
+
   let body: unknown;
   try {
     body = await readBoundedJson(request, AGENT_QA_MAX_REQUEST_BYTES);
@@ -67,12 +72,15 @@ export async function POST(request: Request) {
   }
 
   const input = parsed.data;
-  const dedupeKey = buildDedupeKey({
+  // Dedupe and task identity are scoped to the authenticated user: two users
+  // submitting the same specification must not collide (phase 3).
+  const ownerKey = auth.user.username.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 40);
+  const dedupeKey = `${ownerKey}:${buildDedupeKey({
     ...(input.requestKey ? { requestKey: input.requestKey } : {}),
     engine: input.engine,
     ...(input.maxIterations ? { maxIterations: input.maxIterations } : {}),
     specification: input.specification,
-  });
+  })}`;
 
   let runtime;
   try {
@@ -89,13 +97,14 @@ export async function POST(request: Request) {
   // Generated here, not by the store: the run callback needs the identifier before the store
   // returns the record, and reading the record from inside its own initializer would not work.
   const jobId = randomUUID();
-  const taskId = `qa:${dedupeKey}`;
+  const taskId = `qa-${ownerKey}:${dedupeKey}`;
 
   try {
     const job = runtime.store.startJob({
       jobId,
       taskId,
       dedupeKey,
+      owner: auth.user.username,
       budgetSnapshot: () => {
         const snapshot = runtime.budget.snapshot();
         return {
@@ -112,6 +121,7 @@ export async function POST(request: Request) {
           {
             jobId,
             taskId,
+            ...(isAuthEnforced() ? { user: auth.user.username } : {}),
             specification: input.specification,
             maxIterations,
             ...(input.scale === undefined ? {} : { scale: input.scale }),

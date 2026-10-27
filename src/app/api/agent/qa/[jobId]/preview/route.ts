@@ -5,6 +5,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { assertPathWithinRoots, defaultAllowedRoots } from "@/agent/artifact";
 import { AgentQaErrorSchema, type AgentQaErrorCode } from "@/agent/api/request-schema";
+import { authenticateApiRequest, forbiddenResponse } from "@/auth/guard";
+import { isAuthEnforced } from "@/auth/session";
 import { getAgentRuntime } from "@/agent/runtime";
 
 export const runtime = "nodejs";
@@ -27,9 +29,12 @@ function errorResponse(code: AgentQaErrorCode, message: string, status: number, 
  * provider HTTPS artifact URL through the polling route instead of being proxied here.
  */
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ jobId: string }> },
 ) {
+  const auth = authenticateApiRequest(request);
+  if (!auth.ok) return auth.response;
+
   const { jobId } = await context.params;
   if (!JobIdSchema.safeParse(jobId).success) {
     return errorResponse("JOB_NOT_FOUND", "No render-and-review job matches that identifier.", 404);
@@ -37,6 +42,10 @@ export async function GET(
 
   const runtime = getAgentRuntime();
   const job = runtime.store.getJob(jobId);
+  // Ownership is checked before existence so another user's job reveals nothing.
+  if (job && isAuthEnforced() && job.owner && job.owner !== auth.user.username) {
+    return forbiddenResponse();
+  }
   const artifact = job?.result?.artifact;
   if (!job || !artifact) {
     return errorResponse("PREVIEW_NOT_AVAILABLE", "This job has no retained preview.", 404);

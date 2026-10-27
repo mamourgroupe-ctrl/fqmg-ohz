@@ -11,7 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { AnimationPlayer } from "../../components/AnimationPlayer";
+import { SandboxedPreview } from "../../sandbox/SandboxedPreview";
 import { CodeEditor } from "../../components/CodeEditor";
 import { Header } from "../../components/Header";
 import { TabPanel } from "../../components/TabPanel";
@@ -38,7 +38,7 @@ function DemoPageContent() {
   const [fps, setFps] = useState(selectedExample.fps);
   const selectedButtonRef = useRef<HTMLButtonElement>(null);
 
-  const { code, Component, error, isCompiling, setCode, compileCode } =
+  const { code, transpiled, error, isCompiling, setCode, compileCode } =
     useAnimationState(selectedExample.code);
 
   // Auto-scroll to selected example
@@ -181,8 +181,8 @@ function DemoPageContent() {
               }
               previewContent={
                 <div className="h-full max-w-4xl">
-                  <AnimationPlayer
-                    Component={Component}
+                  <SandboxedPreview
+                    transpiled={transpiled}
                     durationInFrames={durationInFrames}
                     fps={fps}
                     onDurationChange={setDurationInFrames}
@@ -190,7 +190,6 @@ function DemoPageContent() {
                     isCompiling={isCompiling}
                     isStreaming={false}
                     error={error}
-                    code={code}
                   />
                 </div>
               }

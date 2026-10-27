@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { LanguageTagSchema } from "@/voice/contracts/voice-contract";
 import { getVoiceEngine } from "@/voice/runtime";
+import { authenticateApiRequest } from "@/auth/guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,6 +9,9 @@ export const dynamic = "force-dynamic";
 const MAX_RETURNED_VOICES_PER_PROVIDER = 100;
 
 export async function GET(request: Request) {
+  const auth = authenticateApiRequest(request, "voice-providers");
+  if (!auth.ok) return auth.response;
+
   const url = new URL(request.url);
   const languageTag = LanguageTagSchema.safeParse(url.searchParams.get("languageTag") ?? "ar-DZ");
   if (!languageTag.success) {

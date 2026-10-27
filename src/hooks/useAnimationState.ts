@@ -1,14 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import {
-  compileCode as compile,
-  type CompilationResult,
-} from "../remotion/compiler";
+import { transpileGeneratedCode } from "@/remotion/compiler";
+
+/**
+ * Phase 4 — main-context state for the legacy code path.
+ *
+ * This hook NEVER creates a live component: generated code is validated
+ * (fail-closed AST whitelist) and transpiled to plain JS only. The transpiled
+ * string is rendered by the opaque-origin sandbox iframe
+ * (src/sandbox/SandboxedPreview + src/app/preview-sandbox), so no
+ * LLM-generated code executes in the main page context anymore.
+ */
 
 export interface AnimationState {
   code: string;
-  Component: React.ComponentType | null;
+  /** Babel output for the sandbox iframe — never a React component. */
+  transpiled: string | null;
   error: string | null;
   isCompiling: boolean;
 }
@@ -16,26 +24,22 @@ export interface AnimationState {
 export function useAnimationState(initialCode: string = "") {
   const [state, setState] = useState<AnimationState>({
     code: initialCode,
-    Component: null,
+    transpiled: null,
     error: null,
     isCompiling: false,
   });
 
-  // Compile code when it changes (with debouncing handled by caller)
   const compileCode = useCallback((code: string) => {
     setState((prev) => ({ ...prev, isCompiling: true }));
-
-    const result: CompilationResult = compile(code);
-
+    const result = transpileGeneratedCode(code);
     setState((prev) => ({
       ...prev,
-      Component: result.Component,
+      transpiled: result.transpiled,
       error: result.error,
       isCompiling: false,
     }));
   }, []);
 
-  // Update code and trigger compilation
   const setCode = useCallback((newCode: string) => {
     setState((prev) => ({ ...prev, code: newCode }));
   }, []);
@@ -45,7 +49,7 @@ export function useAnimationState(initialCode: string = "") {
     if (initialCode) {
       compileCode(initialCode);
     }
-  }, []);
+  }, [initialCode, compileCode]);
 
   return {
     ...state,

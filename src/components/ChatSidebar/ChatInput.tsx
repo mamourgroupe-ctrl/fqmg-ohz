@@ -9,11 +9,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { captureFrame } from "@/helpers/capture-frame";
 import { useImageAttachments } from "@/hooks/useImageAttachments";
 import { MODELS, type ModelId } from "@/types/generation";
 import { ArrowUp, Camera, Paperclip, X } from "lucide-react";
-import { useEffect, useState, type ComponentType } from "react";
+import { useEffect, useState } from "react";
 
 interface ChatInputProps {
   prompt: string;
@@ -22,10 +21,9 @@ interface ChatInputProps {
   onModelChange: (model: ModelId) => void;
   isLoading: boolean;
   onSubmit: (attachedImages?: string[]) => void;
-  // Frame capture props
-  Component?: ComponentType | null;
-  fps?: number;
-  durationInFrames?: number;
+  // Frame capture (phase 4): renders one frame INSIDE the sandboxed preview
+  // iframe and resolves with a JPEG data URL.
+  captureFrameRequest?: ((frame: number) => Promise<string>) | null;
   currentFrame?: number;
 }
 
@@ -36,9 +34,7 @@ export function ChatInput({
   onModelChange,
   isLoading,
   onSubmit,
-  Component,
-  fps = 30,
-  durationInFrames = 150,
+  captureFrameRequest,
   currentFrame = 0,
 }: ChatInputProps) {
   const [isCapturing, setIsCapturing] = useState(false);
@@ -83,16 +79,13 @@ export function ChatInput({
   };
 
   const handleCapture = async () => {
-    if (!Component || isCapturing || !canAddMore) return;
+    if (!captureFrameRequest || isCapturing || !canAddMore) return;
 
     setIsCapturing(true);
     try {
-      const base64 = await captureFrame(Component, currentFrame, {
-        width: 1920,
-        height: 1080,
-        fps,
-        durationInFrames,
-      });
+      // Phase 4: the frame is rendered inside the sandboxed preview iframe —
+      // no generated component ever runs in this (main) context.
+      const base64 = await captureFrameRequest(currentFrame);
       addImages([base64]);
     } catch (error) {
       console.error("Failed to capture frame:", error);
@@ -101,7 +94,7 @@ export function ChatInput({
     }
   };
 
-  const canCapture = Component && !isLoading && !isCapturing && canAddMore;
+  const canCapture = Boolean(captureFrameRequest) && !isLoading && !isCapturing && canAddMore;
 
   return (
     <div className="px-4 pt-4 pb-4">
@@ -172,7 +165,7 @@ export function ChatInput({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/png,image/jpeg"
             multiple
             onChange={handleFileSelect}
             className="hidden"

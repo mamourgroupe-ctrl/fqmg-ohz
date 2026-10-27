@@ -1,0 +1,79 @@
+# Automated CI quality gates (Phase 0, audit gate enforced since Phase 1).
+#
+# Runs on every push and pull request: install, typecheck, lint, test (with v8
+# coverage), production build, then a production-dependency audit.
+#
+# AUDIT GATE: `npm audit --omit=dev --audit-level=high` now FAILS the build on
+# any high or critical finding in production dependencies. Phase 1
+# (docs/audit-after.md) brought the production tree to 0 findings; if this gate
+# goes red, fix or override before merging (see docs/decisions.md D-007..D-010).
+#
+# The two manual workflows (render-smoke, voice-live-check) are unchanged and
+# remain workflow_dispatch-only.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies (npm ci)
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test (vitest with v8 coverage, no thresholds yet)
+        run: npm run test:coverage
+
+      - name: Upload coverage report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ github.run_id }}
+          path: coverage/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Production build
+        run: npm run build
+
+      - name: "Production dependency audit (enforcing - fails on high+)"
+        run: |
+          mkdir -p ci-audit
+          npm audit --omit=dev --audit-level=high --json > ci-audit/audit-prod.json 2> ci-audit/audit-stderr.txt
+
+      - name: Upload audit report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: audit-prod-${{ github.run_id }}
+          path: ci-audit/
+          if-no-files-found: warn
+          retention-days: 7

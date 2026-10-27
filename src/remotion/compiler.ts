@@ -1,4 +1,8 @@
 import * as Babel from "@babel/standalone";
+import {
+  validateGeneratedCode,
+  type CodeViolation,
+} from "@/sandbox/code-validator";
 import { Lottie } from "@remotion/lottie";
 import * as RemotionShapes from "@remotion/shapes";
 import { ThreeCanvas } from "@remotion/three";
@@ -33,6 +37,8 @@ loadTajawal(); // preload Tajawal
 export interface CompilationResult {
   Component: React.ComponentType | null;
   error: string | null;
+  /** Set when the phase-4 sandbox validator rejected the code. */
+  violations?: CodeViolation[];
 }
 
 interface SourceEdit {
@@ -875,14 +881,74 @@ export function extractComponentBody(code: string): string {
   );
 }
 
-// Standalone compile function for use outside React components
+// Standalone compile function for use outside React components.
+//
+// LEGACY (phase 4, tagged): this still evaluates generated code with
+// `new Function` — it is ONLY acceptable inside the Remotion renderer context
+// (headless browser / Lambda via DynamicComp), never in the interactive page.
+// The main-context preview must go through src/sandbox/SandboxedPreview +
+// transpileGeneratedCode instead. Malicious code is refused by the phase-4
+// AST validator before any evaluation, in both contexts.
 export function compileCode(code: string): CompilationResult {
-  if (!code?.trim()) {
-    return { Component: null, error: "No code provided" };
+  const prepared = transpileGeneratedCode(code);
+  if (prepared.error !== null || prepared.transpiled === null) {
+    return {
+      Component: null,
+      error: prepared.error,
+      violations: prepared.violations,
+    };
   }
 
   try {
-    const componentBody = extractComponentBody(code);
+    const evaluated = evaluateTranspiled(prepared.transpiled);
+
+    if (typeof evaluated !== "function") {
+      return {
+        Component: null,
+        error: "Code must be a function that returns a React component",
+      };
+    }
+
+    return { Component: evaluated as React.ComponentType, error: null };
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown compilation error";
+    return { Component: null, error: errorMessage };
+  }
+}
+
+export interface TranspiledGeneratedCode {
+  /** Babel output (plain JS) — NEVER a live component. Safe to postMessage. */
+  transpiled: string | null;
+  error: string | null;
+  violations?: CodeViolation[];
+}
+
+/**
+ * Phase 4: validate + transpile generated code WITHOUT creating any
+ * component. This is the parent-context entry point for the sandboxed
+ * preview: the transpiled string is handed to the opaque-origin iframe over
+ * postMessage and only evaluated there.
+ */
+export function transpileGeneratedCode(code: string): TranspiledGeneratedCode {
+  if (!code?.trim()) {
+    return { transpiled: null, error: "No code provided" };
+  }
+
+  const componentBody = extractComponentBody(code);
+  const validation = validateGeneratedCode(componentBody);
+  if (!validation.ok) {
+    const summary = validation.violations
+      .map((violation) => `${violation.kind}:${violation.name}`)
+      .join(", ");
+    return {
+      transpiled: null,
+      error: `Generated code rejected by the sandbox security policy: ${summary}`,
+      violations: validation.violations,
+    };
+  }
+
+  try {
     const wrappedSource = `const DynamicAnimation = () => {\n${componentBody}\n};`;
 
     const transpiled = Babel.transform(wrappedSource, {
@@ -891,126 +957,127 @@ export function compileCode(code: string): CompilationResult {
     });
 
     if (!transpiled.code) {
-      return { Component: null, error: "Transpilation failed" };
+      return { transpiled: null, error: "Transpilation failed" };
     }
 
-    const Remotion = {
-      AbsoluteFill,
-      interpolate,
-      useCurrentFrame,
-      useVideoConfig,
-      spring,
-      Sequence,
-      Img,
-      staticFile,
-    };
-
-    const wrappedCode = `${transpiled.code}\nreturn DynamicAnimation;`;
-
-    const createComponent = new Function(
-      "React",
-      "Remotion",
-      "RemotionShapes",
-      "Lottie",
-      "ThreeCanvas",
-      "THREE",
-      "AbsoluteFill",
-      "interpolate",
-      "useCurrentFrame",
-      "useVideoConfig",
-      "spring",
-      "Sequence",
-      "Img",
-      "staticFile",
-      "useState",
-      "useEffect",
-      "useMemo",
-      "useRef",
-      "Rect",
-      "Circle",
-      "Triangle",
-      "Star",
-      "Polygon",
-      "Ellipse",
-      "Heart",
-      "Pie",
-      "makeRect",
-      "makeCircle",
-      "makeTriangle",
-      "makeStar",
-      "makePolygon",
-      "makeEllipse",
-      "makeHeart",
-      "makePie",
-      // Transitions
-      "TransitionSeries",
-      "linearTiming",
-      "springTiming",
-      "fade",
-      "slide",
-      "wipe",
-      "flip",
-      "clockWipe",
-      wrappedCode,
-    );
-
-    const Component = createComponent(
-      React,
-      Remotion,
-      RemotionShapes,
-      Lottie,
-      ThreeCanvas,
-      THREE,
-      AbsoluteFill,
-      interpolate,
-      useCurrentFrame,
-      useVideoConfig,
-      spring,
-      Sequence,
-      Img,
-      staticFile,
-      useState,
-      useEffect,
-      useMemo,
-      useRef,
-      RemotionShapes.Rect,
-      RemotionShapes.Circle,
-      RemotionShapes.Triangle,
-      RemotionShapes.Star,
-      RemotionShapes.Polygon,
-      RemotionShapes.Ellipse,
-      RemotionShapes.Heart,
-      RemotionShapes.Pie,
-      RemotionShapes.makeRect,
-      RemotionShapes.makeCircle,
-      RemotionShapes.makeTriangle,
-      RemotionShapes.makeStar,
-      RemotionShapes.makePolygon,
-      RemotionShapes.makeEllipse,
-      RemotionShapes.makeHeart,
-      RemotionShapes.makePie,
-      // Transitions
-      TransitionSeries,
-      linearTiming,
-      springTiming,
-      fade,
-      slide,
-      wipe,
-      flip,
-      clockWipe,
-    );
-
-    if (typeof Component !== "function") {
-      return {
-        Component: null,
-        error: "Code must be a function that returns a React component",
-      };
-    }
-
-    return { Component, error: null };
+    return { transpiled: transpiled.code, error: null };
   } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : "Unknown compilation error";
-    return { Component: null, error: errorMessage };
+    return { transpiled: null, error: errorMessage };
   }
+}
+
+/**
+ * Evaluates ALREADY-VALIDATED, ALREADY-TRANSPILED code with the React/Remotion
+ * whitelist as the only injections. Callers must have run
+ * transpileGeneratedCode (which enforces the phase-4 validator) — this helper
+ * performs no security checks of its own.
+ */
+export function evaluateTranspiled(transpiledCode: string): unknown {
+  const Remotion = {
+    AbsoluteFill,
+    interpolate,
+    useCurrentFrame,
+    useVideoConfig,
+    spring,
+    Sequence,
+    Img,
+    staticFile,
+  };
+
+  const wrappedCode = `${transpiledCode}\nreturn DynamicAnimation;`;
+
+  const createComponent = new Function(
+    "React",
+    "Remotion",
+    "RemotionShapes",
+    "Lottie",
+    "ThreeCanvas",
+    "THREE",
+    "AbsoluteFill",
+    "interpolate",
+    "useCurrentFrame",
+    "useVideoConfig",
+    "spring",
+    "Sequence",
+    "Img",
+    "staticFile",
+    "useState",
+    "useEffect",
+    "useMemo",
+    "useRef",
+    "Rect",
+    "Circle",
+    "Triangle",
+    "Star",
+    "Polygon",
+    "Ellipse",
+    "Heart",
+    "Pie",
+    "makeRect",
+    "makeCircle",
+    "makeTriangle",
+    "makeStar",
+    "makePolygon",
+    "makeEllipse",
+    "makeHeart",
+    "makePie",
+    // Transitions
+    "TransitionSeries",
+    "linearTiming",
+    "springTiming",
+    "fade",
+    "slide",
+    "wipe",
+    "flip",
+    "clockWipe",
+    wrappedCode,
+  );
+
+  return createComponent(
+    React,
+    Remotion,
+    RemotionShapes,
+    Lottie,
+    ThreeCanvas,
+    THREE,
+    AbsoluteFill,
+    interpolate,
+    useCurrentFrame,
+    useVideoConfig,
+    spring,
+    Sequence,
+    Img,
+    staticFile,
+    useState,
+    useEffect,
+    useMemo,
+    useRef,
+    RemotionShapes.Rect,
+    RemotionShapes.Circle,
+    RemotionShapes.Triangle,
+    RemotionShapes.Star,
+    RemotionShapes.Polygon,
+    RemotionShapes.Ellipse,
+    RemotionShapes.Heart,
+    RemotionShapes.Pie,
+    RemotionShapes.makeRect,
+    RemotionShapes.makeCircle,
+    RemotionShapes.makeTriangle,
+    RemotionShapes.makeStar,
+    RemotionShapes.makePolygon,
+    RemotionShapes.makeEllipse,
+    RemotionShapes.makeHeart,
+    RemotionShapes.makePie,
+    // Transitions
+    TransitionSeries,
+    linearTiming,
+    springTiming,
+    fade,
+    slide,
+    wipe,
+    flip,
+    clockWipe,
+  );
 }
