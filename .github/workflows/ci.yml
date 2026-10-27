@@ -1,15 +1,12 @@
-# Automated CI quality gates (Phase 0).
+# Automated CI quality gates (Phase 0, audit gate enforced since Phase 1).
 #
 # Runs on every push and pull request: install, typecheck, lint, test (with v8
 # coverage), production build, then a production-dependency audit.
 #
-# AUDIT WARNING MODE (deliberate, documented in docs/progress.md and
-# docs/decisions.md): `npm audit --omit=dev` currently reports known HIGH
-# vulnerabilities in production dependencies (zod <4.6.6 / GHSA-mrhx-c7xc-m3w5,
-# dompurify via monaco-editor, fast-uri, and the @remotion/* chain). Phase 1
-# (dependencies) fixes or mitigates them; until then this step uploads the
-# report and emits a ::warning:: annotation instead of failing the build.
-# Remove the `|| warning` fallback in that step when Phase 1 lands.
+# AUDIT GATE: `npm audit --omit=dev --audit-level=high` now FAILS the build on
+# any high or critical finding in production dependencies. Phase 1
+# (docs/audit-after.md) brought the production tree to 0 findings; if this gate
+# goes red, fix or override before merging (see docs/decisions.md D-007..D-010).
 #
 # The two manual workflows (render-smoke, voice-live-check) are unchanged and
 # remain workflow_dispatch-only.
@@ -67,17 +64,10 @@ jobs:
       - name: Production build
         run: npm run build
 
-      - name: Production dependency audit (npm audit --omit=dev)
-        # Warning mode until Phase 1 — see the header comment. The step must
-        # never mask its own failure silently: the annotation always prints.
+      - name: Production dependency audit (enforcing: fails on high+)
         run: |
           mkdir -p ci-audit
-          if npm audit --omit=dev --json > ci-audit/audit-prod.json 2> ci-audit/audit-stderr.txt; then
-            echo "npm audit --omit=dev: no known production vulnerabilities."
-          else
-            npm audit --omit=dev || true
-            echo "::warning::npm audit --omit=dev reports production vulnerabilities. Warning mode until Phase 1 (dependencies) lands; see docs/decisions.md (D-002)."
-          fi
+          npm audit --omit=dev --audit-level=high --json > ci-audit/audit-prod.json 2> ci-audit/audit-stderr.txt
 
       - name: Upload audit report
         if: ${{ always() }}
