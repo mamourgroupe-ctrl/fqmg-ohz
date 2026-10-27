@@ -1,0 +1,89 @@
+# Automated CI quality gates (Phase 0).
+#
+# Runs on every push and pull request: install, typecheck, lint, test (with v8
+# coverage), production build, then a production-dependency audit.
+#
+# AUDIT WARNING MODE (deliberate, documented in docs/progress.md and
+# docs/decisions.md): `npm audit --omit=dev` currently reports known HIGH
+# vulnerabilities in production dependencies (zod <4.6.6 / GHSA-mrhx-c7xc-m3w5,
+# dompurify via monaco-editor, fast-uri, and the @remotion/* chain). Phase 1
+# (dependencies) fixes or mitigates them; until then this step uploads the
+# report and emits a ::warning:: annotation instead of failing the build.
+# Remove the `|| warning` fallback in that step when Phase 1 lands.
+#
+# The two manual workflows (render-smoke, voice-live-check) are unchanged and
+# remain workflow_dispatch-only.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies (npm ci)
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test (vitest with v8 coverage, no thresholds yet)
+        run: npm run test:coverage
+
+      - name: Upload coverage report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ github.run_id }}
+          path: coverage/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Production build
+        run: npm run build
+
+      - name: Production dependency audit (npm audit --omit=dev)
+        # Warning mode until Phase 1 — see the header comment. The step must
+        # never mask its own failure silently: the annotation always prints.
+        run: |
+          mkdir -p ci-audit
+          if npm audit --omit=dev --json > ci-audit/audit-prod.json 2> ci-audit/audit-stderr.txt; then
+            echo "npm audit --omit=dev: no known production vulnerabilities."
+          else
+            npm audit --omit=dev || true
+            echo "::warning::npm audit --omit=dev reports production vulnerabilities. Warning mode until Phase 1 (dependencies) lands; see docs/decisions.md (D-002)."
+          fi
+
+      - name: Upload audit report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: audit-prod-${{ github.run_id }}
+          path: ci-audit/
+          if-no-files-found: warn
+          retention-days: 7
