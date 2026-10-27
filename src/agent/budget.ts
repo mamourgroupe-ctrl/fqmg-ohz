@@ -32,6 +32,12 @@ export type BudgetApproval = z.infer<typeof BudgetApprovalSchema>;
 export interface BudgetPolicy {
   dailyLimitUsd: number;
   taskLimitUsd: number;
+  /**
+   * Optional per-user daily ceiling (phase 3). When unset, every user is bounded
+   * by the global daily ceiling alone. An approval can raise a task limit but
+   * never the daily or per-user daily ceiling.
+   */
+  userDailyLimitUsd?: number;
 }
 
 export type BudgetRefusalCode =
@@ -73,6 +79,8 @@ interface Reservation {
   estimatedUsd: number;
   createdAt: number;
   approvalUsed: boolean;
+  /** Authenticated owner this reservation is accounted against (phase 3). */
+  user?: string;
 }
 
 function utcDayKey(timestamp: number): string {
@@ -87,6 +95,7 @@ export class BudgetLedger {
   private readonly policy: BudgetPolicy;
   private readonly now: () => number;
   private readonly reservations = new Map<string, Reservation>();
+  private readonly settledByUser = new Map<string, number>();
   private settledToday = 0;
   private dayUtc: string;
   private sequence = 0;
@@ -102,6 +111,7 @@ export class BudgetLedger {
     if (today === this.dayUtc) return;
     this.dayUtc = today;
     this.settledToday = 0;
+    this.settledByUser.clear();
     this.reservations.clear();
   }
 
@@ -129,6 +139,7 @@ export class BudgetLedger {
     taskId: string;
     estimate: CostEstimate | undefined;
     approval?: BudgetApproval;
+    user?: string;
   }): ReserveOutcome {
     this.rollDay();
 
@@ -173,11 +184,30 @@ export class BudgetLedger {
     const remainingDaily = round(this.policy.dailyLimitUsd - committed);
     const approvalUsed = approval?.success === true;
 
-    if (estimateUsd > remainingDaily) {
+    // Per-user ceiling (phase 3): a user can only consume their own slice of
+    // the day. Reservations and settled spend are both counted per user.
+    let effectiveRemaining = remainingDaily;
+    let userCeilingBinding = false;
+    if (input.user) {
+      const userLimit = this.policy.userDailyLimitUsd ?? this.policy.dailyLimitUsd;
+      let userCommitted = this.settledByUser.get(input.user) ?? 0;
+      for (const reservation of this.reservations.values()) {
+        if (reservation.user === input.user) userCommitted += reservation.estimatedUsd;
+      }
+      const remainingForUser = round(userLimit - round(userCommitted));
+      if (remainingForUser < effectiveRemaining) {
+        effectiveRemaining = remainingForUser;
+        userCeilingBinding = true;
+      }
+    }
+
+    if (estimateUsd > effectiveRemaining) {
       return {
         ok: false,
         code: "daily-limit-exceeded",
-        message: `The request is estimated at USD ${estimateUsd.toFixed(4)} but only USD ${Math.max(0, remainingDaily).toFixed(4)} of the USD ${this.policy.dailyLimitUsd.toFixed(2)} daily budget remains. An approval cannot raise the daily ceiling.`,
+        message: userCeilingBinding && input.user
+          ? `The user ${input.user} has USD ${Math.max(0, effectiveRemaining).toFixed(4)} left of their USD ${(this.policy.userDailyLimitUsd ?? this.policy.dailyLimitUsd).toFixed(2)} daily budget, but the request is estimated at USD ${estimateUsd.toFixed(4)}.`
+          : `The request is estimated at USD ${estimateUsd.toFixed(4)} but only USD ${Math.max(0, remainingDaily).toFixed(4)} of the USD ${this.policy.dailyLimitUsd.toFixed(2)} daily budget remains. An approval cannot raise the daily ceiling.`,
       };
     }
 
@@ -206,6 +236,7 @@ export class BudgetLedger {
       estimatedUsd: round(estimateUsd),
       createdAt: this.now(),
       approvalUsed,
+      ...(input.user ? { user: input.user } : {}),
     });
 
     return {
@@ -240,6 +271,9 @@ export class BudgetLedger {
 
     this.reservations.delete(reservationId);
     this.settledToday = round(this.settledToday + actual);
+    if (reservation.user) {
+      this.settledByUser.set(reservation.user, round((this.settledByUser.get(reservation.user) ?? 0) + actual));
+    }
     return {
       ok: true,
       reservationId,

@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+// Business-logic suite for the wrapper contract; the auth boundary is covered
+// in tests/api-auth.test.ts (phase 3).
+process.env.AUTH_ENABLED = "0";
 import { z } from "zod";
 import { executeApi } from "@/helpers/api-response";
 

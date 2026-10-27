@@ -2,12 +2,16 @@ import { NextResponse } from "next/server";
 import { createDirectorPlan } from "@/ai/director/plan-video";
 import { DirectorRequestSchema } from "@/ai/director/request-schema";
 import { readBoundedJson, VoiceRequestBodyError } from "@/voice/api/read-bounded-json";
+import { authenticateApiRequest } from "@/auth/guard";
 
 export const runtime = "nodejs";
 
 const PLAN_MAX_REQUEST_BYTES = 32 * 1024;
 
 export async function POST(request: Request) {
+  const auth = authenticateApiRequest(request, "plan");
+  if (!auth.ok) return auth.response;
+
   let body: unknown;
   try {
     body = await readBoundedJson(request, PLAN_MAX_REQUEST_BYTES);

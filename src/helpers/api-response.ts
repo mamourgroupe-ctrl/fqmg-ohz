@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z, ZodType } from "zod";
 import { sanitizeDiagnosticText } from "@/agent/redaction";
 import { readBoundedJson, VoiceRequestBodyError } from "@/voice/api/read-bounded-json";
+import { authenticateApiRequest } from "@/auth/guard";
+import type { RatePolicyName } from "@/auth/rate-limit";
 
 export type ApiResponse<Res> =
   | {
@@ -16,6 +18,8 @@ export type ApiResponse<Res> =
 export interface ExecuteApiOptions {
   /** Hard cap for the request body in bytes (default 64 KB). */
   maxBodyBytes?: number;
+  /** Per-user rate policy applied after authentication (phase 3). */
+  ratePolicy?: RatePolicyName;
 }
 
 export const DEFAULT_API_BODY_BYTES = 64 * 1024;
@@ -39,6 +43,9 @@ export const executeApi =
     options: ExecuteApiOptions = {},
   ) =>
   async (req: Request) => {
+    const auth = authenticateApiRequest(req, options.ratePolicy);
+    if (!auth.ok) return auth.response;
+
     const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_API_BODY_BYTES;
 
     let payload: unknown;

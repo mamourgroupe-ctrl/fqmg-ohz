@@ -42,5 +42,5 @@ export const POST = executeApi<ProgressResponse, typeof ProgressRequest>(
     };
   },
   // A progress poll is two short strings; anything bigger is invalid.
-  { maxBodyBytes: 16 * 1024 },
+  { maxBodyBytes: 16 * 1024, ratePolicy: "lambda-progress" },
 );

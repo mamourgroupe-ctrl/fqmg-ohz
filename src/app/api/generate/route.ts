@@ -16,6 +16,7 @@ import {
   GenerateImageValidationError,
   validateGenerateRequestImages,
 } from "@/lib/generate-request-schema";
+import { authenticateApiRequest } from "@/auth/guard";
 
 import {
   ModelRouterError,
@@ -622,6 +623,10 @@ interface GenerateResponse {
 }
 
 export async function POST(req: Request) {
+  // Phase 3: identity + per-user rate limit come before anything else.
+  const auth = authenticateApiRequest(req, "generate");
+  if (!auth.ok) return auth.response;
+
   // Every request gets a correlation identifier: logs carry the id and lengths
   // only, never the prompt, code, or image content (phase 2 log hygiene).
   const requestId = randomUUID();

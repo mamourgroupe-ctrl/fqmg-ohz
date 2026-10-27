@@ -208,6 +208,8 @@ export interface AgentLoopDependencies {
 export interface AgentLoopRequest {
   jobId: string;
   taskId?: string;
+  /** Authenticated owner (username) accounted in the per-user budget ceiling. */
+  user?: string;
   specification: unknown;
   maxIterations?: number;
   scale?: number;
@@ -610,6 +612,7 @@ export async function runAgentLoop(
       taskId: `${jobId.data}:critique:${iteration}`,
       estimate: critiqueEstimate,
       ...(request.approval ? { approval: request.approval } : {}),
+      ...(request.user ? { user: request.user } : {}),
     });
     if (!critiqueReservation.ok) {
       failureReason = "budget-refused";
@@ -772,6 +775,7 @@ export async function runAgentLoop(
         taskId: `${jobId.data}:repair:${iteration}`,
         estimate: repairEstimate,
         ...(request.approval ? { approval: request.approval } : {}),
+        ...(request.user ? { user: request.user } : {}),
       });
       if (!repairReservation.ok) {
         failureReason = "budget-refused";

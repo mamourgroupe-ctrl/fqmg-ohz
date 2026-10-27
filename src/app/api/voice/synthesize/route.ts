@@ -9,6 +9,8 @@ import { readBoundedJson, VoiceRequestBodyError } from "@/voice/api/read-bounded
 import { applyVoiceResultToMotionSpecification } from "@/voice/project/apply-voice-to-motion-specification";
 import { VoiceEngineError } from "@/voice/routing/voice-engine";
 import { getVoiceEngine } from "@/voice/runtime";
+import { authenticateApiRequest } from "@/auth/guard";
+import { recordAudioOwner } from "@/auth/ownership";
 
 export const runtime = "nodejs";
 
@@ -26,6 +28,9 @@ function errorResponse(
 }
 
 export async function POST(request: Request) {
+  const auth = authenticateApiRequest(request, "voice-synthesize");
+  if (!auth.ok) return auth.response;
+
   let body: unknown;
   try {
     body = await readBoundedJson(request, MAX_VOICE_REQUEST_BYTES);
@@ -63,6 +68,9 @@ export async function POST(request: Request) {
       disclosures: outcome.disclosures,
       completedAt: outcome.completedAt,
     });
+
+    // The produced audio belongs to the authenticated requester (phase 3).
+    recordAudioOwner(outcome.audioReference.id, auth.user.username);
 
     let updatedSpecification;
     if (motionSpecification && placement) {

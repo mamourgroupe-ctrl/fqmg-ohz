@@ -1,4 +1,9 @@
 import { beforeAll, describe, expect, it } from "vitest";
+
+// This suite exercises business logic, not the auth boundary: the explicit
+// development escape keeps the handlers reachable (phase 3 covers 401/403/429
+// in tests/api-auth.test.ts, tests/api-authorization.test.ts, tests/api-rate-limit.test.ts).
+process.env.AUTH_ENABLED = "0";
 import { POST as lambdaRenderPost } from "@/app/api/lambda/render/route";
 import { POST as lambdaProgressPost } from "@/app/api/lambda/progress/route";
 

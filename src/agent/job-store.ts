@@ -145,6 +145,8 @@ export interface AgentJobRecord {
   jobId: string;
   taskId: string;
   dedupeKey: string;
+  /** Authenticated owner (username) set by the job API; undefined in dev-escape mode. */
+  owner?: string;
   status: AgentJobStatus;
   stage: (typeof AGENT_STAGES)[number];
   progress: number;
@@ -166,6 +168,8 @@ export interface StartAgentJobInput {
   jobId?: string;
   taskId: string;
   dedupeKey: string;
+  /** Authenticated owner recorded for authorization on poll/cancel/preview. */
+  owner?: string;
   run: (signal: AbortSignal, onProgress: (progress: AgentProgress) => void) => Promise<AgentLoopResult>;
   budgetSnapshot: () => z.infer<typeof AgentJobBudgetViewSchema>;
 }
@@ -292,6 +296,7 @@ export class AgentJobStore {
       jobId,
       taskId: input.taskId,
       dedupeKey: input.dedupeKey,
+      ...(input.owner ? { owner: input.owner } : {}),
       status: "queued",
       stage: "queued",
       progress: 0,

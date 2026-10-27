@@ -90,6 +90,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "auth:hash": "tsx scripts/hash-password.mts",
     "remotion": "remotion studio src/remotion/index.ts",
     "studio": "remotion studio src/remotion/entry.tsx",
     "render": "remotion render src/remotion/index.ts",

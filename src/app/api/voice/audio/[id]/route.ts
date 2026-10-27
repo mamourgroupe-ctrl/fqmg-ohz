@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { VoiceApiErrorSchema } from "@/voice/contracts/voice-contract";
 import { getVoiceEngine } from "@/voice/runtime";
+import { authenticateApiRequest, forbiddenResponse } from "@/auth/guard";
+import { getAudioOwner } from "@/auth/ownership";
+import { isAuthEnforced } from "@/auth/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,7 +12,19 @@ export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  const auth = authenticateApiRequest(_request, "voice-audio");
+  if (!auth.ok) return auth.response;
+
   const { id } = await context.params;
+  // Fail closed: a reference with no recorded owner (or owned by someone else)
+  // is served to nobody (phase 3 ownership).
+  if (isAuthEnforced()) {
+    const owner = getAudioOwner(id);
+    if (!owner || owner !== auth.user.username) {
+      return forbiddenResponse("This audio belongs to another user or is unknown.");
+    }
+  }
+
   const audio = await getVoiceEngine().cache.readReference(id);
   if (!audio) {
     return NextResponse.json(VoiceApiErrorSchema.parse({
