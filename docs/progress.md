@@ -331,6 +331,21 @@ allow-same-origin، CSP بلا شبكة وunsafe-eval محصور بالمعزو�
   لمسارات محذوفة، موثقة في D-025). لا حذف صامت للتغطية.
 - فحص متبقٍ: grep على كل الرموز المحذوفة = إشارات تاريخية في الوثائق فقط.
 
+**اكتشافان أثناء أول تنفيذ CI حقيقي للمسار (موثقان في D-026):**
+- `rspack: true` في Remotion يجعل المجمّع يتجاهل `webpackOverride` تمامًا
+  (عداد الاستدعاء 0)، فيسقط alias `@/*` ويفشل bundle لـ entry.tsx. أُعيد
+  إنتاجه محليًا بمكالمة `bundle()` مباشرة، وأُصلح بإزالة rspack من
+  local-render-backend ومن remotion.config.ts (تحقق CLI bundle بعدها). سلوك
+  rspack يفشل لأنه لا يطبق الـ override — ليس خطأ alias.
+- تقليص القالب للاختبار كان يصفّر-يمنع startFrame=0 (Math.max(1,..)) فيكسر
+  قيد "layer timing must fit inside its scene". أُصلح: المدد فقط >= 1.
+- إعادة هيكلة: نصف "إعداد المواصفة" (shrink → parse → assess → blueprint
+  data-only) صار اختبارًا دائمًا بلا متصفح — يُنفَّذ محليًا وفي CI (كان قبلها
+  غير منفَّذ محليًا إطلاقًا بسبب التخطي).
+- قناة تشخيص CI: خطوة الاختبار تُعيد إطلاق أسطر الفشل كـ `::error::` وملخص
+  النجاح كـ `::notice::` annotations — قابلة للقراءة عبر checks API حتى حين
+  يكون مستقبِل السجلات/Artifacts معطلًا (حدث فعلًا: عائد 0 بايت).
+
 **اختبار تكامل المسار الموحد مع بوابة ffprobe (tests/render-unified-pipeline.test.ts):**
 - يقود القالب الحقيقي عبر المسار الإنتاجي كاملًا: MotionSpecificationSchema →
   RemotionLocalRenderBackend (bundle لـ entry.tsx + اختيار FQMG-OHZ-Preview)
@@ -343,3 +358,14 @@ allow-same-origin، CSP بلا شبكة وunsafe-eval محصور بالمعزو�
   ffprobe n7.1 داخل node_modules) ورندر المتصفح تَخَطّى؛ في CI (ubuntu-24.04
   + إنترنت مفتوح): `FQMG_REQUIRE_RENDER_PIPELINE=1` يجعل الرندر الكامل
   ينفّذ فعلًا مع استدعاء ffprobe حقيقي.
+
+**خلاصة المرحلة 6 (مكتملة):**
+- 5 التزامات: e8ef793 (فصل النشر) → 81b0592 (حذف الميت −1097 سطرًا) →
+  3505a71 (اختبار التكامل) → 8461b6c (تشخيص CI) → bcfc358 (إصلاح التقليص +
+  إعادة هيكلة) → 82fab40 (إصلاح rspack/D-026) → 77fe538 (قناة إثبات التنفيذ).
+- الاختبار النهائي: **494 اختبارًا في 49 ملفًا** (محليًا: 493 نجح + 1 تخطٍّ
+  بيئة-بلا-متصفح؛ في CI: تنفيذ كامل بما فيه الرندر). typecheck/lint/audit 0.
+- **إثبات بوابة ffprobe في CI (run 40969166437، commit 77fe538):**
+  `[render-unified] EXECUTED: ffprobe verified 162x288 @30fps, 2.00s, 6KB,
+  composition=FQMG-OHZ-Preview` — الخطوة **نُفّذت** فعلًا (ملف الاختبار 20.7s)
+  عبر `verifyRenderOutput` الإنتاجية، وليست متخطّاة.
