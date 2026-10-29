@@ -90,7 +90,7 @@ jobs:
           # Success path: surface the render-execution proof and the summary
           # as notice annotations (readable via the checks API even when the
           # log receiver is unreachable).
-          grep -aE "render-unified|Test Files|Tests  " /tmp/vitest-output.log | tail -5 | cut -c1-380 | redact | sed 's/^/::notice::/'
+          grep -aE "render-unified|audio-unified|Test Files|Tests  " /tmp/vitest-output.log | tail -5 | cut -c1-380 | redact | sed 's/^/::notice::/'
         env:
           FQMG_TEST_REDIS_URL: redis://127.0.0.1:6379
           FQMG_REQUIRE_REDIS_TESTS: "1"
