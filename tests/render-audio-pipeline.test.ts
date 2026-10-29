@@ -116,6 +116,7 @@ function buildAudioSpecification(options: {
 describe("unified render pipeline with audio mixing (phase 7)", () => {
   let outputDir = "";
   let publicDir = "";
+  let bundleDir = "";
   let browserReady = false;
   let browserFailure = "";
 
@@ -204,21 +205,35 @@ describe("unified render pipeline with audio mixing (phase 7)", () => {
         // be disturbed (CI failure diagnostics, run 40974153880).
         bundleCaching: false,
         onBundleReady: (serveUrl) => {
-          const assetsDir = path.join(serveUrl, "assets");
-          const listing = existsSync(assetsDir)
-            ? readdirSync(assetsDir).join(",")
-            : "<no assets dir>";
-          console.log(
-            `[audio-unified] bundle=${serveUrl} assets=[${listing}]`,
-          );
+          bundleDir = serveUrl;
         },
       });
 
-      const artifact = await backend.render({
-        jobId: `audio-${randomUUID()}`,
-        specification,
-        timeoutMs: 480_000,
-      });
+      let artifact;
+      try {
+        artifact = await backend.render({
+          jobId: `audio-${randomUUID()}`,
+          specification,
+          timeoutMs: 480_000,
+        });
+      } catch (error) {
+        // Re-throw WITH the served directory state: CI annotations carry
+        // this message verbatim, so a 404 mystery is self-describing.
+        const state = bundleDir
+          ? `bundleDir=${bundleDir} assetsDirExists=${existsSync(path.join(bundleDir, "assets"))} ` +
+            `listing=${(() => {
+              try {
+                return readdirSync(bundleDir).slice(0, 20).join(",");
+              } catch (e) {
+                return `unreadable: ${(e as Error).message}`;
+              }
+            })()}`
+          : "onBundleReady never fired";
+        throw new Error(
+          `[audio-unified] render failed; ${state}; original error: ` +
+            (error instanceof Error ? error.message : String(error)),
+        );
+      }
       expect(artifact.kind).toBe("local-file");
 
       const verified = await verifyRenderOutput((artifact as { absolutePath: string }).absolutePath, {
