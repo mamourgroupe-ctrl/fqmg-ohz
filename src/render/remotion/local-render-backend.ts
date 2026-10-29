@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, stat } from "node:fs/promises";
+import { cp as fsCp, mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { bundle } from "@remotion/bundler";
 import { makeCancelSignal, renderMedia, selectComposition } from "@remotion/renderer";
@@ -34,10 +34,13 @@ export interface LocalRenderBackendOptions {
   scale?: number;
   logLevel?: "error" | "warn" | "info";
   /**
-   * Directory served as the bundle's static root (Remotion publicDir).
-   * Audio/image assets referenced with app-relative sources such as
-   * `/assets/tone.wav` must exist under this directory to resolve during
-   * the render (phase 7 audio mixing).
+   * Directory of app-relative media (e.g. `assets/tone.wav` under it).
+   * Its CONTENTS are copied into the bundle ROOT after bundling, mirroring
+   * production URL semantics (Next serves public/ at the origin root), so a
+   * spec source like `/assets/tone.wav` resolves during the render exactly
+   * like it would against the deployed app. (Remotion's own publicDir
+   * serving exposes files under /public/..., which the asset-source schema
+   * forbids — verified empirically, D-027.)
    */
   publicDir?: string;
   /** Test seams. */
@@ -134,12 +137,22 @@ export class RemotionLocalRenderBackend implements RenderBackend {
       // the `@/*` alias from webpack-override.mjs does not apply), so the
       // unified entry.tsx fails with "Module not found: @/motion/...".
       // Webpack honors the override; this is D-026 in docs/decisions.md.
-      ...(this.publicDir ? { publicDir: this.publicDir } : {}),
       ...(signal ? { signal } : {}),
-    }).catch((error: unknown) => {
-      this.bundlePromise = undefined;
-      throw mapRemotionFailure(error, [this.entryPoint, this.outputDir]);
-    });
+    })
+      .then(async (serveUrl) => {
+        // App-relative media sources (/assets/...) must resolve at the serve
+        // origin root like they do against the deployed app. Remotion's own
+        // publicDir serving would put them under /public/... (verified), so
+        // copy the contents into the bundle root instead.
+        if (this.publicDir) {
+          await fsCp(this.publicDir, serveUrl, { recursive: true });
+        }
+        return serveUrl;
+      })
+      .catch((error: unknown) => {
+        this.bundlePromise = undefined;
+        throw mapRemotionFailure(error, [this.entryPoint, this.outputDir]);
+      });
 
     return this.bundlePromise;
   }
