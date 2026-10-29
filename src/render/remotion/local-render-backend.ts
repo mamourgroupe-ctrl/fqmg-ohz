@@ -33,6 +33,13 @@ export interface LocalRenderBackendOptions {
   outputDir?: string;
   scale?: number;
   logLevel?: "error" | "warn" | "info";
+  /**
+   * Directory served as the bundle's static root (Remotion publicDir).
+   * Audio/image assets referenced with app-relative sources such as
+   * `/assets/tone.wav` must exist under this directory to resolve during
+   * the render (phase 7 audio mixing).
+   */
+  publicDir?: string;
   /** Test seams. */
   bundleFn?: typeof bundle;
   selectCompositionFn?: typeof selectComposition;
@@ -94,6 +101,7 @@ export class RemotionLocalRenderBackend implements RenderBackend {
   private readonly outputDir: string;
   private readonly scale: number;
   private readonly logLevel: "error" | "warn" | "info";
+  private readonly publicDir?: string;
   private readonly bundleFn: typeof bundle;
   private readonly selectCompositionFn: typeof selectComposition;
   private readonly renderMediaFn: typeof renderMedia;
@@ -107,6 +115,7 @@ export class RemotionLocalRenderBackend implements RenderBackend {
     this.outputDir = options.outputDir ?? path.resolve(process.cwd(), "renders/agent");
     this.scale = options.scale ?? DEFAULT_PREVIEW_SCALE;
     this.logLevel = options.logLevel ?? "error";
+    this.publicDir = options.publicDir;
     this.bundleFn = options.bundleFn ?? bundle;
     this.selectCompositionFn = options.selectCompositionFn ?? selectComposition;
     this.renderMediaFn = options.renderMediaFn ?? renderMedia;
@@ -125,6 +134,7 @@ export class RemotionLocalRenderBackend implements RenderBackend {
       // the `@/*` alias from webpack-override.mjs does not apply), so the
       // unified entry.tsx fails with "Module not found: @/motion/...".
       // Webpack honors the override; this is D-026 in docs/decisions.md.
+      ...(this.publicDir ? { publicDir: this.publicDir } : {}),
       ...(signal ? { signal } : {}),
     }).catch((error: unknown) => {
       this.bundlePromise = undefined;

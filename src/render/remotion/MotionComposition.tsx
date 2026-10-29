@@ -1,11 +1,12 @@
 import { useMemo, type CSSProperties } from "react";
-import { AbsoluteFill, Img, Sequence, Video, useCurrentFrame } from "remotion";
+import { AbsoluteFill, Audio, Img, Sequence, Video, useCurrentFrame } from "remotion";
 import {
   MotionSpecificationSchema,
   type AssetSpec,
   type MotionLayer,
   type MotionSpecification,
 } from "@/motion/schemas/motion-specification";
+import { audioTrackVolumeAt } from "@/render/remotion/audio-mix";
 
 export interface MotionCompositionProps {
   spec: MotionSpecification;
@@ -181,6 +182,43 @@ function SceneView({ scene, assets }: { scene: MotionSpecification["scenes"][num
   );
 }
 
+/**
+ * Phase-7 audio mixing: tracks live on the ABSOLUTE composition timeline
+ * (unlike scene sequences) and follow the same source convention as
+ * <Img>/<Video> — the raw asset.source resolved against the serve origin.
+ * A track referencing a missing or unresolved asset fails the render
+ * loudly instead of rendering a silent video.
+ */
+function AudioTracksView({ specification }: { specification: MotionSpecification }) {
+  return (
+    <>
+      {specification.audio.tracks.map((track) => {
+        const source = resolveSource(specification.assets, track.assetId);
+        if (!source) {
+          throw new Error(
+            `Audio track "${track.id}" references a missing or unresolved asset "${track.assetId}".`,
+          );
+        }
+        return (
+          <Sequence
+            key={track.id}
+            from={track.startFrame}
+            durationInFrames={track.durationInFrames}
+            layout="none"
+          >
+            <Audio
+              src={source}
+              volume={(localFrame: number) =>
+                audioTrackVolumeAt(localFrame, track, specification.audio.masterVolume)
+              }
+            />
+          </Sequence>
+        );
+      })}
+    </>
+  );
+}
+
 export function MotionComposition({ spec }: MotionCompositionProps) {
   const parsed = useMemo(() => MotionSpecificationSchema.safeParse(spec), [spec]);
   if (!parsed.success) {
@@ -198,6 +236,7 @@ export function MotionComposition({ spec }: MotionCompositionProps) {
   const specification = parsed.data;
   return (
     <AbsoluteFill style={{ backgroundColor: specification.composition.backgroundColor }}>
+      <AudioTracksView specification={specification} />
       {specification.scenes.map((scene) => (
         <Sequence
           key={scene.id}

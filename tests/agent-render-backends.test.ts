@@ -172,6 +172,9 @@ describe("local Remotion render backend", () => {
 
   it("refuses specifications the existing adapter does not support", async () => {
     const outputDir = await makeDirectory();
+    // Phase 7 lifted the blanket audio rejection: a plain audio track with a
+    // valid asset now RENDERS. The backend still refuses specs the adapter
+    // marks unsupported — normalize stays fail-closed in this phase.
     const withAudio = createSpecification();
     withAudio.assets.push({
       id: "voice-file",
@@ -190,6 +193,7 @@ describe("local Remotion render backend", () => {
       fadeInFrames: 0,
       fadeOutFrames: 0,
     });
+    withAudio.audio.normalize = true;
 
     const backend = new RemotionLocalRenderBackend({ outputDir });
     await expect(
