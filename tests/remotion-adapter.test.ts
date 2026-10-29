@@ -21,7 +21,11 @@ describe("Remotion adapter", () => {
     expect(blueprint.inputProps.spec.scenes).toHaveLength(3);
   });
 
-  it("does not claim Phase 1 support for audio mixing", () => {
+  it("supports audio mixing as of phase 7 (timing, gain, fades)", () => {
+    // Phase 7 lifted the phase-1 blanket rejection: a plain audio track
+    // referencing a known asset is now renderable. The still-unsupported
+    // cases (normalize/ducking, unknown assets) are covered by
+    // tests/remotion-audio-adapter.test.ts.
     const withAudio = structuredClone(specification);
     withAudio.assets.push({
       id: "voice-file",
@@ -41,7 +45,6 @@ describe("Remotion adapter", () => {
       fadeOutFrames: 0,
     });
     const assessment = new RemotionAdapter().assess(withAudio);
-    expect(assessment.supported).toBe(false);
-    expect(assessment.reasons.join(" ")).toContain("Audio mixing");
+    expect(assessment.supported).toBe(true);
   });
 });

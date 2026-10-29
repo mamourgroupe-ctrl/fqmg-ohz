@@ -64,8 +64,9 @@ describe("voice result and Motion Specification integration", () => {
     expect(updated.audio.voiceSelection?.voiceId).toBe("fixture-voice");
 
     const assessment = new RemotionAdapter().assess(updated);
-    expect(assessment.supported).toBe(false);
-    expect(assessment.reasons.join(" ")).toContain("Audio mixing");
+    // Phase 7: a voice-attached specification is now renderable — the old
+    // blanket "Audio mixing" rejection applied only before mixing existed.
+    expect(assessment.supported).toBe(true);
   });
 
   it("requires explicit confirmation before replacing the project voice pin", () => {
