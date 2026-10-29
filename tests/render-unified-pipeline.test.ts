@@ -208,6 +208,7 @@ describe("unified render pipeline (phase 6)", () => {
             `FQMG_REQUIRE_RENDER_PIPELINE=1 but the render prerequisites are missing: ${reasons}`,
           );
         }
+        console.warn(`[render-unified] SKIPPED: ${reasons}`);
         ctx.skip();
         return;
       }
@@ -279,6 +280,11 @@ describe("unified render pipeline (phase 6)", () => {
       expect(verified.durationSeconds).toBeGreaterThan(0);
       expect(verified.durationSeconds).toBeLessThanOrEqual(
         specification.composition.durationInFrames / specification.composition.fps + 2,
+      );
+      console.log(
+        `[render-unified] EXECUTED: ffprobe verified ${verified.width}x${verified.height} ` +
+          `@${verified.fps}fps, ${verified.durationSeconds.toFixed(2)}s, ` +
+          `${(verified.sizeBytes / 1024).toFixed(0)}KB, composition=${selectedCompositionId}`,
       );
     },
   );
