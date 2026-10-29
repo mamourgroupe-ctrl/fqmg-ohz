@@ -145,7 +145,7 @@ describe("unified render pipeline with audio mixing (phase 7)", () => {
 
   /** Synthesizes the fixture tone and lays out publicDir/assets/<name>. */
   async function makePublicAsset(name: string, seconds: number, corrupt = false): Promise<string> {
-    publicDir ??= await fs.mkdtemp(path.join(os.tmpdir(), "fqmg-audio-public-"));
+    publicDir ||= await fs.mkdtemp(path.join(os.tmpdir(), "fqmg-audio-public-"));
     const assetsDir = path.join(publicDir, "assets");
     await fs.mkdir(assetsDir, { recursive: true, mode: 0o700 });
     const filePath = path.join(assetsDir, name);
@@ -169,7 +169,7 @@ describe("unified render pipeline with audio mixing (phase 7)", () => {
   }
 
   async function makeOutputDir(): Promise<string> {
-    outputDir ??= await fs.mkdtemp(path.join(os.tmpdir(), "fqmg-audio-render-"));
+    outputDir ||= await fs.mkdtemp(path.join(os.tmpdir(), "fqmg-audio-render-"));
     return outputDir;
   }
 
@@ -208,7 +208,7 @@ describe("unified render pipeline with audio mixing (phase 7)", () => {
         // gone from the served directory mid-render). A dedicated outDir is
         // outside that namespace and cache is force-disabled with it.
         bundleCaching: false,
-        bundleOutputDir: (ownBundleDir ??= await fs.mkdtemp(
+        bundleOutputDir: (ownBundleDir ||= await fs.mkdtemp(
           path.join(os.tmpdir(), "fqmg-audio-bundle-"),
         )),
         onBundleReady: (serveUrl) => {
