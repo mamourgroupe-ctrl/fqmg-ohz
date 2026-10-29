@@ -103,7 +103,7 @@ describe("phase 3: job/preview ownership", () => {
     expect(response.status).toBe(202);
     const body = (await response.json()) as { jobId: string };
     aliceJobId = body.jobId;
-    const job = store.getJob(aliceJobId!);
+    const job = await store.getJob(aliceJobId!);
     expect(job?.owner).toBe("alice");
   });
 

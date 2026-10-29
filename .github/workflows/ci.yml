@@ -29,6 +29,19 @@ jobs:
     name: gates
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # Phase 5: the shared-state suites (tests/shared-state.test.ts) run against
+    # a real Redis; FQMG_REQUIRE_REDIS_TESTS=1 makes an unreachable server FAIL
+    # instead of silently skipping, so a broken service can never fake green.
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -51,6 +64,9 @@ jobs:
 
       - name: Test (vitest with v8 coverage, no thresholds yet)
         run: npm run test:coverage
+        env:
+          FQMG_TEST_REDIS_URL: redis://127.0.0.1:6379
+          FQMG_REQUIRE_REDIS_TESTS: "1"
 
       - name: Upload coverage report
         if: ${{ always() }}

@@ -86,7 +86,7 @@ describe("agent configuration", () => {
 });
 
 describe("agent runtime wiring", () => {
-  it("disables every paid provider by default and enforces the documented ceilings", () => {
+  it("disables every paid provider by default and enforces the documented ceilings", async () => {
     const runtime = createAgentRuntime({});
 
     expect(runtime.visionProvider.isConfigured).toBe(false);
@@ -94,7 +94,7 @@ describe("agent runtime wiring", () => {
     expect(runtime.repairProvider.isConfigured).toBe(false);
     expect(runtime.priceBook.entries).toEqual([]);
 
-    const snapshot = runtime.budget.snapshot();
+    const snapshot = await runtime.budget.snapshot();
     expect(snapshot).toMatchObject({
       dailyLimitUsd: 0.25,
       taskLimitUsd: 0.03,
