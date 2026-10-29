@@ -49,6 +49,14 @@ export interface LocalRenderBackendOptions {
    * which makes per-backend publicDir copies collide (phase 7 debugging).
    */
   bundleCaching?: boolean;
+  /**
+   * Dedicated bundle output directory (Remotion `outDir`). Use this to keep
+   * the bundle OUT of Remotion's shared /tmp/remotion-webpack-bundle-*
+   * namespace: parallel renders can trigger its cleanup while a render is
+   * still reading the directory (observed in CI as a mid-render 404 for a
+   * copied asset, D-027). Absolute path; caching is force-disabled with it.
+   */
+  bundleOutputDir?: string;
   /** Invoked once the bundle directory is ready (after the publicDir copy). */
   onBundleReady?: (serveUrl: string) => void;
   /** Test seams. */
@@ -114,6 +122,7 @@ export class RemotionLocalRenderBackend implements RenderBackend {
   private readonly logLevel: "error" | "warn" | "info";
   private readonly publicDir?: string;
   private readonly bundleCaching: boolean;
+  private readonly bundleOutputDir?: string;
   private readonly onBundleReady?: (serveUrl: string) => void;
   private readonly bundleFn: typeof bundle;
   private readonly selectCompositionFn: typeof selectComposition;
@@ -130,6 +139,7 @@ export class RemotionLocalRenderBackend implements RenderBackend {
     this.logLevel = options.logLevel ?? "error";
     this.publicDir = options.publicDir;
     this.bundleCaching = options.bundleCaching ?? true;
+    this.bundleOutputDir = options.bundleOutputDir;
     this.onBundleReady = options.onBundleReady;
     this.bundleFn = options.bundleFn ?? bundle;
     this.selectCompositionFn = options.selectCompositionFn ?? selectComposition;
@@ -149,7 +159,8 @@ export class RemotionLocalRenderBackend implements RenderBackend {
       // the `@/*` alias from webpack-override.mjs does not apply), so the
       // unified entry.tsx fails with "Module not found: @/motion/...".
       // Webpack honors the override; this is D-026 in docs/decisions.md.
-      enableCaching: this.bundleCaching,
+      enableCaching: this.bundleCaching && !this.bundleOutputDir,
+      ...(this.bundleOutputDir ? { outDir: this.bundleOutputDir } : {}),
       ...(signal ? { signal } : {}),
     })
       .then(async (serveUrl) => {

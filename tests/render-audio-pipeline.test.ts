@@ -116,6 +116,7 @@ function buildAudioSpecification(options: {
 describe("unified render pipeline with audio mixing (phase 7)", () => {
   let outputDir = "";
   let publicDir = "";
+  let ownBundleDir = "";
   let bundleDir = "";
   let browserReady = false;
   let browserFailure = "";
@@ -138,6 +139,7 @@ describe("unified render pipeline with audio mixing (phase 7)", () => {
     await Promise.all([
       outputDir ? fs.rm(outputDir, { recursive: true, force: true }) : Promise.resolve(),
       publicDir ? fs.rm(publicDir, { recursive: true, force: true }) : Promise.resolve(),
+      ownBundleDir ? fs.rm(ownBundleDir, { recursive: true, force: true }) : Promise.resolve(),
     ]);
   });
 
@@ -200,10 +202,15 @@ describe("unified render pipeline with audio mixing (phase 7)", () => {
         publicDir,
         scale: 0.15,
         logLevel: "error",
-        // Isolate from parallel workers sharing Remotion's bundle cache: this
-        // backend must own its bundle directory so the publicDir copy cannot
-        // be disturbed (CI failure diagnostics, run 40974153880).
+        // Own the bundle directory: Remotion's shared /tmp bundle namespace
+        // gets cleaned up by concurrent bundle() calls while a render is
+        // still reading it (CI run 40975060347 proved the assets/ copy was
+        // gone from the served directory mid-render). A dedicated outDir is
+        // outside that namespace and cache is force-disabled with it.
         bundleCaching: false,
+        bundleOutputDir: (ownBundleDir ??= await fs.mkdtemp(
+          path.join(os.tmpdir(), "fqmg-audio-bundle-"),
+        )),
         onBundleReady: (serveUrl) => {
           bundleDir = serveUrl;
         },
