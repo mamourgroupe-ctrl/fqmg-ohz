@@ -63,12 +63,18 @@ jobs:
         run: npm run lint
 
       - name: Test (vitest with v8 coverage, no thresholds yet)
-        # tee the full output into an artifact: the Actions log receiver has
-        # been flaky (0-byte downloads), this guarantees the failure text.
+        # The Actions log/artifact receivers can be unreachable for some
+        # clients, so on failure the relevant lines are re-emitted as
+        # ::error:: annotations — those stay readable through the checks API.
         shell: bash
         run: |
-          set -eo pipefail
+          set -o pipefail
           npm run test:coverage 2>&1 | tee /tmp/vitest-output.log
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            grep -aE "FAIL |Error: |AssertionError|expected |→|❯ tests/" /tmp/vitest-output.log | tail -40 | cut -c1-380 | sed 's/^/::error::/'
+            exit "$rc"
+          fi
         env:
           FQMG_TEST_REDIS_URL: redis://127.0.0.1:6379
           FQMG_REQUIRE_REDIS_TESTS: "1"

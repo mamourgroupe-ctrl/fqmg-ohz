@@ -16,6 +16,7 @@ import {
   type MotionSpecification,
 } from "@/motion/schemas/motion-specification";
 import { RemotionLocalRenderBackend } from "@/render/remotion/local-render-backend";
+import { RemotionAdapter } from "@/render/remotion/remotion-adapter";
 
 /**
  * Phase-6 integration test: the ONE unified composition path.
@@ -72,12 +73,15 @@ async function browserDownloadHostReachable(): Promise<boolean> {
 
 /** Shrink the real template proportionally so the render stays small but valid. */
 function shrinkSpecification(divisor: number): MotionSpecification {
-  const d = (n: number): number => Math.max(1, Math.round(n / divisor));
+  // Durations must stay >= 1, but START frames and keyframe frames may be 0:
+  // clamping them to 1 broke "layer timing must fit inside its scene".
+  const d = (n: number): number => Math.round(n / divisor);
+  const dDuration = (n: number): number => Math.max(1, Math.round(n / divisor));
   const shrunk = {
     ...(previewSpecification as object),
     composition: {
       ...(previewSpecification as { composition: object }).composition,
-      durationInFrames: d(
+      durationInFrames: dDuration(
         (previewSpecification as { composition: { durationInFrames: number } })
           .composition.durationInFrames,
       ),
@@ -99,19 +103,19 @@ function shrinkSpecification(divisor: number): MotionSpecification {
       return {
         ...scene,
         startFrame: d(scene.startFrame),
-        durationInFrames: d(scene.durationInFrames),
+        durationInFrames: dDuration(scene.durationInFrames),
         transition: scene.transition
-          ? { ...scene.transition, durationInFrames: d(scene.transition.durationInFrames) }
+          ? { ...scene.transition, durationInFrames: dDuration(scene.transition.durationInFrames) }
           : undefined,
         layers: scene.layers.map((layer) => ({
           ...layer,
           startFrame: d(layer.startFrame),
-          durationInFrames: d(layer.durationInFrames),
+          durationInFrames: dDuration(layer.durationInFrames),
           ...(layer.keyframes
             ? {
                 keyframes: layer.keyframes.map((kf) => ({
                   ...kf,
-                  frame: Math.min(d(kf.frame), d(layer.durationInFrames) - 1),
+                  frame: Math.min(d(kf.frame), dDuration(layer.durationInFrames) - 1),
                 })),
               }
             : {}),
@@ -159,6 +163,34 @@ describe("unified render pipeline (phase 6)", () => {
     }
     expect(probeReady).toBe(true);
   });
+
+  /**
+   * This test runs WITHOUT a browser, everywhere (local sandbox and CI): it
+   * exercises the data-only half of the unified path that the render test
+   * would otherwise skip offline. Shrinking, schema parsing and the adapter
+   * assessment are exactly the steps the render performs before any frame.
+   */
+  it(
+    "prepares valid data-only input props through the unified adapter (no browser needed)",
+    { timeout: 30_000 },
+    () => {
+      const specification = shrinkSpecification(5);
+      expect(specification.composition.durationInFrames).toBe(60);
+      expect(specification.scenes).toHaveLength(3);
+
+      const adapter = new RemotionAdapter();
+      const assessment = adapter.assess(specification);
+      expect(assessment.supported).toBe(true);
+      const blueprint = adapter.createBlueprint(specification);
+      expect(blueprint.inputProps).toEqual({ spec: specification });
+      expect(blueprint.width).toBe(specification.composition.width);
+      expect(blueprint.height).toBe(specification.composition.height);
+      expect(blueprint.fps).toBe(specification.composition.fps);
+      expect(blueprint.durationInFrames).toBe(
+        specification.composition.durationInFrames,
+      );
+    },
+  );
 
   it(
     "renders the unified entry.tsx composition end-to-end and passes the production ffprobe gate",
