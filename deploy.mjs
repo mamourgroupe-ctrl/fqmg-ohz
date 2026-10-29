@@ -8,31 +8,31 @@ import path from "path";
 import { DISK, RAM, REGION, SITE_NAME, TIMEOUT } from "./config.mjs";
 import { webpackOverride } from "./src/remotion/webpack-override.mjs";
 
+// Phase 6: EXPLICIT deployment command (npm run deploy:lambda) — never part
+// of any build. Fails loudly (non-zero exit) without AWS credentials.
 console.log("Selected region:", REGION);
 dotenv.config({quiet: true});
 
 if (!process.env.AWS_ACCESS_KEY_ID && !process.env.REMOTION_AWS_ACCESS_KEY_ID) {
-  console.log(
-    'The environment variable "REMOTION_AWS_ACCESS_KEY_ID" is not set.',
+  console.error(
+    'ERROR: "REMOTION_AWS_ACCESS_KEY_ID" (or AWS_ACCESS_KEY_ID) is not set. Refusing to run an incomplete Lambda deployment.',
   );
-  console.log("Lambda renders were not set up.");
-  console.log(
-    "Complete the Lambda setup: at https://www.remotion.dev/docs/lambda/setup",
+  console.error(
+    "Complete the Lambda setup first: https://www.remotion.dev/docs/lambda/setup",
   );
-  process.exit(0);
+  process.exit(1);
 }
 if (
   !process.env.AWS_SECRET_ACCESS_KEY &&
   !process.env.REMOTION_AWS_SECRET_ACCESS_KEY
 ) {
-  console.log(
-    'The environment variable "REMOTION_REMOTION_AWS_SECRET_ACCESS_KEY" is not set.',
+  console.error(
+    'ERROR: "REMOTION_AWS_SECRET_ACCESS_KEY" (or AWS_SECRET_ACCESS_KEY) is not set. Refusing to run an incomplete Lambda deployment.',
   );
-  console.log("Lambda renders were not set up.");
-  console.log(
-    "Complete the Lambda setup: at https://www.remotion.dev/docs/lambda/setup",
+  console.error(
+    "Complete the Lambda setup first: https://www.remotion.dev/docs/lambda/setup",
   );
-  process.exit(0);
+  process.exit(1);
 }
 
 process.stdout.write("Deploying Lambda function... ");
@@ -63,7 +63,8 @@ console.log(
 process.stdout.write("Deploying site... ");
 const { siteName } = await deploySite({
   bucketName,
-  entryPoint: path.join(process.cwd(), "src", "remotion", "index.ts"),
+  // The unified official composition (data-only, FQMG-OHZ-Preview).
+  entryPoint: path.join(process.cwd(), "src", "remotion", "entry.tsx"),
   siteName: SITE_NAME,
   region: REGION,
   options: { webpackOverride },
