@@ -1,5 +1,14 @@
 import { z } from "zod";
 import type { CostEstimate } from "@/agent/pricing";
+import {
+  fromMicroUsd,
+  LocalBudgetBackend,
+  newReservationId,
+  RedisBudgetBackend,
+  toMicroUsd,
+  type BudgetBackend,
+  type BudgetBackendKind,
+} from "@/agent/budget-store";
 
 /**
  * Budget gate for paid requests.
@@ -7,15 +16,17 @@ import type { CostEstimate } from "@/agent/pricing";
  * Owner policy: USD 0.03 per task, USD 0.25 per day.
  *
  * What this ledger does:
- *  - reserves before the request and settles afterwards, so two concurrent requests in the same
- *    process cannot both consume the same remaining budget;
+ *  - reserves before the request and settles afterwards, so concurrent requests cannot both
+ *    consume the same remaining budget;
  *  - refuses a request whose cost cannot be determined (`pricing-unknown`);
  *  - requires an explicit, attributed approval before exceeding the per-task limit;
- *  - keeps the daily limit hard: an approval can raise a task limit, never the daily ceiling.
+ *  - keeps the daily limit hard: an approval can raise a task limit, never the daily ceiling;
+ *  - (phase 5) enforces the ceilings through a swappable backend: the process-local ledger
+ *    (single instance, dev default) or a Redis backend whose reserve/settle/release run as
+ *    atomic Lua scripts shared by every server instance. With a shared backend configured and
+ *    unreachable, reserve FAILS CLOSED with `store-unavailable` — never a silent local fallback.
  *
  * What this ledger does NOT do (stated in docs/agent-loop.md and reported in every result):
- *  - it is process-local. There is no shared store, so a second server instance, a serverless
- *    fan-out, or a restart does not see these reservations;
  *  - it cannot guarantee the provider's final invoice. Provider-side retries, token accounting
  *    differences, and price changes are outside the application's control.
  */
@@ -46,7 +57,8 @@ export type BudgetRefusalCode =
   | "task-limit-exceeded"
   | "daily-limit-exceeded"
   | "duplicate-reservation"
-  | "unknown-reservation";
+  | "unknown-reservation"
+  | "store-unavailable";
 
 export type ReserveOutcome =
   | {
@@ -67,52 +79,44 @@ export interface BudgetSnapshot {
   taskLimitUsd: number;
   activeReservations: number;
   taskIds: string[];
-  /** Always "process-local": see the module header. */
-  enforcement: "process-local";
-  /** Explicit reminder that a local ledger is not an invoice guarantee. */
+  /** "process-local" (single instance) or "shared-redis" (phase 5). */
+  enforcement: BudgetBackendKind;
+  /** Explicit reminder that neither backend is an invoice guarantee. */
   invoiceGuarantee: false;
-}
-
-interface Reservation {
-  reservationId: string;
-  taskId: string;
-  estimatedUsd: number;
-  createdAt: number;
-  approvalUsed: boolean;
-  /** Authenticated owner this reservation is accounted against (phase 3). */
-  user?: string;
 }
 
 function utcDayKey(timestamp: number): string {
   return new Date(timestamp).toISOString().slice(0, 10);
 }
 
-function round(value: number): number {
-  return Math.round(value * 1_000_000) / 1_000_000;
-}
-
 export class BudgetLedger {
   private readonly policy: BudgetPolicy;
   private readonly now: () => number;
-  private readonly reservations = new Map<string, Reservation>();
-  private readonly settledByUser = new Map<string, number>();
-  private settledToday = 0;
-  private dayUtc: string;
-  private sequence = 0;
+  private readonly backend: BudgetBackend;
 
-  constructor(options: { policy: BudgetPolicy; now?: () => number }) {
+  constructor(options: {
+    policy: BudgetPolicy;
+    now?: () => number;
+    /** Explicit backend override (tests). */
+    backend?: BudgetBackend;
+    /** Phase 5: when set (and no explicit backend), the atomic Redis backend is used. */
+    redisUrl?: string;
+    namespace?: string;
+    connectTimeoutMs?: number;
+  }) {
     this.policy = options.policy;
     this.now = options.now ?? Date.now;
-    this.dayUtc = utcDayKey(this.now());
-  }
-
-  private rollDay(): void {
-    const today = utcDayKey(this.now());
-    if (today === this.dayUtc) return;
-    this.dayUtc = today;
-    this.settledToday = 0;
-    this.settledByUser.clear();
-    this.reservations.clear();
+    if (options.backend) {
+      this.backend = options.backend;
+    } else if (options.redisUrl) {
+      this.backend = new RedisBudgetBackend({
+        redisUrl: options.redisUrl,
+        namespace: options.namespace ?? "default",
+        connectTimeoutMs: options.connectTimeoutMs,
+      });
+    } else {
+      this.backend = new LocalBudgetBackend({ now: options.now });
+    }
   }
 
   get dailyLimitUsd(): number {
@@ -123,26 +127,16 @@ export class BudgetLedger {
     return this.policy.taskLimitUsd;
   }
 
-  /** Reserved but not yet settled, plus settled spend for the current UTC day. */
-  private committed(): number {
-    this.rollDay();
-    let reserved = 0;
-    for (const reservation of this.reservations.values()) reserved += reservation.estimatedUsd;
-    return round(reserved + this.settledToday);
+  get enforcement(): BudgetBackendKind {
+    return this.backend.kind;
   }
 
-  /**
-   * Reserves budget for one task. Synchronous by design: the check and the write cannot be
-   * interleaved by another request in the same process.
-   */
-  reserve(input: {
+  async reserve(input: {
     taskId: string;
     estimate: CostEstimate | undefined;
     approval?: BudgetApproval;
     user?: string;
-  }): ReserveOutcome {
-    this.rollDay();
-
+  }): Promise<ReserveOutcome> {
     if (!input.estimate) {
       return {
         ok: false,
@@ -160,17 +154,6 @@ export class BudgetLedger {
       };
     }
 
-    for (const reservation of this.reservations.values()) {
-      if (reservation.taskId === input.taskId) {
-        return {
-          ok: false,
-          code: "duplicate-reservation",
-          message:
-            "This task already holds an active budget reservation. Wait for it to finish instead of starting a duplicate paid request.",
-        };
-      }
-    }
-
     const approval = input.approval ? BudgetApprovalSchema.safeParse(input.approval) : undefined;
     if (input.approval && !approval?.success) {
       return {
@@ -180,87 +163,80 @@ export class BudgetLedger {
       };
     }
 
-    const committed = this.committed();
-    const remainingDaily = round(this.policy.dailyLimitUsd - committed);
-    const approvalUsed = approval?.success === true;
+    const nowMs = this.now();
+    const result = await this.backend.reserve({
+      dayUtc: utcDayKey(nowMs),
+      reservationId: newReservationId(),
+      taskId: input.taskId,
+      estimateMicros: toMicroUsd(estimateUsd),
+      ...(input.user ? { user: input.user } : {}),
+      approvalUsed: approval?.success === true,
+      approvalMaxMicros: approval?.success === true ? toMicroUsd(approval.data.maxUsd) : -1,
+      dailyLimitMicros: toMicroUsd(this.policy.dailyLimitUsd),
+      taskLimitMicros: toMicroUsd(this.policy.taskLimitUsd),
+      userDailyLimitMicros:
+        this.policy.userDailyLimitUsd !== undefined ? toMicroUsd(this.policy.userDailyLimitUsd) : -1,
+      nowMs,
+    });
 
-    // Per-user ceiling (phase 3): a user can only consume their own slice of
-    // the day. Reservations and settled spend are both counted per user.
-    let effectiveRemaining = remainingDaily;
-    let userCeilingBinding = false;
-    if (input.user) {
-      const userLimit = this.policy.userDailyLimitUsd ?? this.policy.dailyLimitUsd;
-      let userCommitted = this.settledByUser.get(input.user) ?? 0;
-      for (const reservation of this.reservations.values()) {
-        if (reservation.user === input.user) userCommitted += reservation.estimatedUsd;
-      }
-      const remainingForUser = round(userLimit - round(userCommitted));
-      if (remainingForUser < effectiveRemaining) {
-        effectiveRemaining = remainingForUser;
-        userCeilingBinding = true;
-      }
-    }
-
-    if (estimateUsd > effectiveRemaining) {
+    if (result.ok) {
       return {
-        ok: false,
-        code: "daily-limit-exceeded",
-        message: userCeilingBinding && input.user
-          ? `The user ${input.user} has USD ${Math.max(0, effectiveRemaining).toFixed(4)} left of their USD ${(this.policy.userDailyLimitUsd ?? this.policy.dailyLimitUsd).toFixed(2)} daily budget, but the request is estimated at USD ${estimateUsd.toFixed(4)}.`
-          : `The request is estimated at USD ${estimateUsd.toFixed(4)} but only USD ${Math.max(0, remainingDaily).toFixed(4)} of the USD ${this.policy.dailyLimitUsd.toFixed(2)} daily budget remains. An approval cannot raise the daily ceiling.`,
+        ok: true,
+        reservationId: result.reservationId,
+        estimatedUsd: fromMicroUsd(result.estimateMicros),
+        approvalUsed: result.approvalUsed,
+        remainingDailyUsd: fromMicroUsd(result.remainingDailyMicros),
       };
     }
 
-    if (estimateUsd > this.policy.taskLimitUsd) {
-      if (!approval || !approval.success) {
+    switch (result.code) {
+      case "duplicate-reservation":
+        return {
+          ok: false,
+          code: "duplicate-reservation",
+          message:
+            "This task already holds an active budget reservation. Wait for it to finish instead of starting a duplicate paid request.",
+        };
+      case "daily-limit-exceeded": {
+        const remainingDailyUsd = fromMicroUsd(result.remainingDailyMicros ?? 0);
+        const effectiveRemainingUsd = fromMicroUsd(result.effectiveRemainingMicros ?? 0);
+        return {
+          ok: false,
+          code: "daily-limit-exceeded",
+          message:
+            result.userCeilingBinding && input.user
+              ? `The user ${input.user} has USD ${Math.max(0, effectiveRemainingUsd).toFixed(4)} left of their USD ${(this.policy.userDailyLimitUsd ?? this.policy.dailyLimitUsd).toFixed(2)} daily budget, but the request is estimated at USD ${estimateUsd.toFixed(4)}.`
+              : `The request is estimated at USD ${estimateUsd.toFixed(4)} but only USD ${Math.max(0, remainingDailyUsd).toFixed(4)} of the USD ${this.policy.dailyLimitUsd.toFixed(2)} daily budget remains. An approval cannot raise the daily ceiling.`,
+        };
+      }
+      case "task-limit-exceeded": {
+        if (approval?.success) {
+          return {
+            ok: false,
+            code: "task-limit-exceeded",
+            message: `The approval covers USD ${approval.data.maxUsd.toFixed(4)} but the request is estimated at USD ${estimateUsd.toFixed(4)}.`,
+          };
+        }
         return {
           ok: false,
           code: "task-limit-exceeded",
           message: `The request is estimated at USD ${estimateUsd.toFixed(4)}, above the USD ${this.policy.taskLimitUsd.toFixed(2)} per-task limit. Retry with an explicit user-approved exception.`,
         };
       }
-      if (approval.data.maxUsd < estimateUsd) {
+      case "store-unavailable":
         return {
           ok: false,
-          code: "task-limit-exceeded",
-          message: `The approval covers USD ${approval.data.maxUsd.toFixed(4)} but the request is estimated at USD ${estimateUsd.toFixed(4)}.`,
+          code: "store-unavailable",
+          message:
+            "The shared budget store is unreachable, so this paid request was refused (fail-closed). Retry once the store is back; the request was never started.",
         };
-      }
     }
-
-    this.sequence += 1;
-    const reservationId = `reservation-${this.sequence}`;
-    this.reservations.set(reservationId, {
-      reservationId,
-      taskId: input.taskId,
-      estimatedUsd: round(estimateUsd),
-      createdAt: this.now(),
-      approvalUsed,
-      ...(input.user ? { user: input.user } : {}),
-    });
-
-    return {
-      ok: true,
-      reservationId,
-      estimatedUsd: round(estimateUsd),
-      approvalUsed,
-      remainingDailyUsd: round(this.policy.dailyLimitUsd - this.committed()),
-    };
   }
 
   /** Settles a reservation with the locally known cost (defaults to the estimate). */
-  settle(reservationId: string, actualUsd?: number): ReserveOutcome {
-    this.rollDay();
-    const reservation = this.reservations.get(reservationId);
-    if (!reservation) {
-      return {
-        ok: false,
-        code: "unknown-reservation",
-        message: "The reservation is unknown (already settled, released, or from another process).",
-      };
-    }
-
-    const actual = actualUsd ?? reservation.estimatedUsd;
+  async settle(reservationId: string, actualUsd?: number): Promise<ReserveOutcome> {
+    const estimate = await this.reservedEstimateOf(reservationId);
+    const actual = actualUsd ?? estimate;
     if (!Number.isFinite(actual) || actual < 0) {
       return {
         ok: false,
@@ -268,61 +244,114 @@ export class BudgetLedger {
         message: "The settled amount is not a finite non-negative number.",
       };
     }
-
-    this.reservations.delete(reservationId);
-    this.settledToday = round(this.settledToday + actual);
-    if (reservation.user) {
-      this.settledByUser.set(reservation.user, round((this.settledByUser.get(reservation.user) ?? 0) + actual));
-    }
-    return {
-      ok: true,
+    const result = await this.backend.settle(
       reservationId,
-      estimatedUsd: round(actual),
-      approvalUsed: reservation.approvalUsed,
-      remainingDailyUsd: round(this.policy.dailyLimitUsd - this.committed()),
-    };
-  }
-
-  /** Releases a reservation without spending it (for example when a provider never ran). */
-  release(reservationId: string): ReserveOutcome {
-    this.rollDay();
-    const reservation = this.reservations.get(reservationId);
-    if (!reservation) {
+      toMicroUsd(actual),
+      toMicroUsd(this.policy.dailyLimitUsd),
+    );
+    if (!result.ok) {
+      if (result.code === "store-unavailable") {
+        return {
+          ok: false,
+          code: "store-unavailable",
+          message: "The shared budget store is unreachable; the reservation was NOT settled and will expire.",
+        };
+      }
       return {
         ok: false,
         code: "unknown-reservation",
         message: "The reservation is unknown (already settled, released, or from another process).",
       };
     }
-    this.reservations.delete(reservationId);
     return {
       ok: true,
-      reservationId,
-      estimatedUsd: reservation.estimatedUsd,
-      approvalUsed: reservation.approvalUsed,
-      remainingDailyUsd: round(this.policy.dailyLimitUsd - this.committed()),
+      reservationId: result.reservationId,
+      estimatedUsd: fromMicroUsd(result.estimateMicros),
+      approvalUsed: result.approvalUsed,
+      remainingDailyUsd: fromMicroUsd(result.remainingDailyMicros),
     };
   }
 
-  snapshot(): BudgetSnapshot {
-    this.rollDay();
-    let reserved = 0;
-    const taskIds: string[] = [];
-    for (const reservation of this.reservations.values()) {
-      reserved += reservation.estimatedUsd;
-      taskIds.push(reservation.taskId);
+  /** Releases a reservation without spending it (for example when a provider never ran). */
+  async release(reservationId: string): Promise<ReserveOutcome> {
+    const result = await this.backend.release(
+      reservationId,
+      toMicroUsd(this.policy.dailyLimitUsd),
+    );
+    if (!result.ok) {
+      if (result.code === "store-unavailable") {
+        return {
+          ok: false,
+          code: "store-unavailable",
+          message: "The shared budget store is unreachable; the reservation was NOT released and will expire.",
+        };
+      }
+      return {
+        ok: false,
+        code: "unknown-reservation",
+        message: "The reservation is unknown (already settled, released, or from another process).",
+      };
     }
     return {
-      dayUtc: this.dayUtc,
-      dailyReservedUsd: round(reserved),
-      dailySettledUsd: round(this.settledToday),
-      dailyCommittedUsd: round(reserved + this.settledToday),
+      ok: true,
+      reservationId: result.reservationId,
+      estimatedUsd: fromMicroUsd(result.estimateMicros),
+      approvalUsed: result.approvalUsed,
+      remainingDailyUsd: fromMicroUsd(result.remainingDailyMicros),
+    };
+  }
+
+  async snapshot(): Promise<BudgetSnapshot> {
+    const dayUtc = utcDayKey(this.now());
+    const data = await this.backend.snapshot(dayUtc);
+    if (data === "store-unavailable") {
+      // A snapshot is reporting, not enforcement: report the failure instead of inventing numbers.
+      return {
+        dayUtc,
+        dailyReservedUsd: 0,
+        dailySettledUsd: 0,
+        dailyCommittedUsd: 0,
+        dailyLimitUsd: this.policy.dailyLimitUsd,
+        taskLimitUsd: this.policy.taskLimitUsd,
+        activeReservations: 0,
+        taskIds: [],
+        enforcement: this.backend.kind,
+        invoiceGuarantee: false,
+      };
+    }
+    return {
+      dayUtc: data.dayUtc,
+      dailyReservedUsd: fromMicroUsd(data.reservedMicros),
+      dailySettledUsd: fromMicroUsd(data.settledMicros),
+      dailyCommittedUsd: fromMicroUsd(data.reservedMicros + data.settledMicros),
       dailyLimitUsd: this.policy.dailyLimitUsd,
       taskLimitUsd: this.policy.taskLimitUsd,
-      activeReservations: this.reservations.size,
-      taskIds,
-      enforcement: "process-local",
+      activeReservations: data.activeCount,
+      taskIds: data.taskIds,
+      enforcement: this.backend.kind,
       invoiceGuarantee: false,
     };
   }
+
+  /** The reservation's recorded estimate, so settle() can default to it. */
+  private async reservedEstimateOf(reservationId: string): Promise<number> {
+    const record = await this.backend.getReservation(reservationId);
+    if (record === "store-unavailable" || record === undefined) return 0;
+    return fromMicroUsd(record.estimateMicros);
+  }
+
+  async close(): Promise<void> {
+    await this.backend.close();
+  }
+}
+
+/** Phase 5 convenience: a ledger bound to the shared Redis backend. */
+export function createBudgetLedger(options: {
+  policy: BudgetPolicy;
+  redisUrl: string;
+  namespace?: string;
+  connectTimeoutMs?: number;
+  now?: () => number;
+}): BudgetLedger {
+  return new BudgetLedger(options);
 }

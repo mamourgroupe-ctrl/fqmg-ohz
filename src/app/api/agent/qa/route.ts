@@ -99,23 +99,23 @@ export async function POST(request: Request) {
   const jobId = randomUUID();
   const taskId = `qa-${ownerKey}:${dedupeKey}`;
 
+  // Phase 5: captured once for the store's snapshot closure; live views read
+  // runtime.budget.snapshot() directly (see the [jobId] route).
+  const budgetSnapshotNow = await runtime.budget.snapshot();
   try {
-    const job = runtime.store.startJob({
+    const job = await runtime.store.startJob({
       jobId,
       taskId,
       dedupeKey,
       owner: auth.user.username,
-      budgetSnapshot: () => {
-        const snapshot = runtime.budget.snapshot();
-        return {
-          dailyCommittedUsd: snapshot.dailyCommittedUsd,
-          dailyLimitUsd: snapshot.dailyLimitUsd,
-          taskLimitUsd: snapshot.taskLimitUsd,
-          activeReservations: snapshot.activeReservations,
-          enforcement: "process-local" as const,
-          invoiceGuarantee: false as const,
-        };
-      },
+      budgetSnapshot: () => ({
+        dailyCommittedUsd: budgetSnapshotNow.dailyCommittedUsd,
+        dailyLimitUsd: budgetSnapshotNow.dailyLimitUsd,
+        taskLimitUsd: budgetSnapshotNow.taskLimitUsd,
+        activeReservations: budgetSnapshotNow.activeReservations,
+        enforcement: budgetSnapshotNow.enforcement,
+        invoiceGuarantee: false as const,
+      }),
       run: (signal, onProgress) =>
         runAgentLoop(
           {

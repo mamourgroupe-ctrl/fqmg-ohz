@@ -1,4 +1,5 @@
-import { BudgetLedger } from "@/agent/budget";
+import { BudgetLedger, createBudgetLedger } from "@/agent/budget";
+import { createRedisJobStateStore } from "@/agent/job-state-store";
 import { loadAgentConfig, type AgentConfig } from "@/agent/config";
 import { AgentJobStore } from "@/agent/job-store";
 import { loadPriceBook, type PriceBook } from "@/agent/pricing";
@@ -27,6 +28,8 @@ export interface AgentRuntime {
   repairProvider: MotionRepairProvider;
   store: AgentJobStore;
   getRenderBackend(engine: "remotion-local" | "remotion-lambda"): RenderBackend;
+  /** Phase 5: closes the shared-store connections (tests / graceful shutdown). */
+  closeSharedStores?: () => Promise<void>;
 }
 
 interface AgentRuntimeGlobal {
@@ -100,13 +103,36 @@ type Environment = Readonly<Record<string, string | undefined>>;
 export function createAgentRuntime(env: Environment = process.env): AgentRuntime {
   const config = loadAgentConfig(env);
   const priceBook = loadPriceBook(env);
-  const budget = new BudgetLedger({
-    policy: {
-      dailyLimitUsd: config.dailyBudgetUsd,
-      taskLimitUsd: config.taskBudgetUsd,
-      userDailyLimitUsd: config.userDailyBudgetUsd,
-    },
-  });
+
+  // Phase 5: FQMG_REDIS_URL opts the deployment into SHARED state (budget +
+  // job registry) enforced atomically across instances. Unset = the original
+  // process-local behavior (single-instance dev default). A configured but
+  // unreachable store fails closed inside the budget ledger — it never falls
+  // back to process-local accounting.
+  const redisUrl = env.FQMG_REDIS_URL?.trim() || undefined;
+  const namespace = env.FQMG_SHARED_NAMESPACE?.trim() || "default";
+  const budget = redisUrl
+    ? createBudgetLedger({
+        policy: {
+          dailyLimitUsd: config.dailyBudgetUsd,
+          taskLimitUsd: config.taskBudgetUsd,
+          userDailyLimitUsd: config.userDailyBudgetUsd,
+        },
+        redisUrl,
+        namespace,
+      })
+    : new BudgetLedger({
+        policy: {
+          dailyLimitUsd: config.dailyBudgetUsd,
+          taskLimitUsd: config.taskBudgetUsd,
+          userDailyLimitUsd: config.userDailyBudgetUsd,
+        },
+      });
+
+  const stateStore = redisUrl
+    ? createRedisJobStateStore({ redisUrl, namespace })
+    : undefined;
+  const store = new AgentJobStore({ ttlMs: config.jobTtlMs, stateStore });
 
   return {
     config,
@@ -114,9 +140,13 @@ export function createAgentRuntime(env: Environment = process.env): AgentRuntime
     budget,
     visionProvider: buildVisionProvider(config, env),
     repairProvider: buildRepairProvider(config),
-    store: new AgentJobStore({ ttlMs: config.jobTtlMs }),
+    store,
     getRenderBackend: (engine) =>
       engine === "remotion-lambda" ? getLambdaBackend() : getLocalBackend(),
+    closeSharedStores: async () => {
+      await budget.close();
+      await stateStore?.close();
+    },
   };
 }
 
