@@ -84,7 +84,7 @@ jobs:
               -e 's/(Bearer|Basic) [A-Za-z0-9._~+/-]{8,}/\1 [REDACTED]/g'
           }
           if [ "$rc" -ne 0 ]; then
-            grep -aE "FAIL |Error: |AssertionError|expected |→|❯ tests/" /tmp/vitest-output.log | tail -40 | cut -c1-380 | redact | sed 's/^/::error::/'
+            grep -aE "FAIL |Error: |AssertionError|expected |→|❯ tests/|audio-unified|render-unified" /tmp/vitest-output.log | tail -40 | cut -c1-380 | redact | sed 's/^/::error::/'
             exit "$rc"
           fi
           # Success path: surface the render-execution proof and the summary

@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import { existsSync, readdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -198,6 +199,19 @@ describe("unified render pipeline with audio mixing (phase 7)", () => {
         publicDir,
         scale: 0.15,
         logLevel: "error",
+        // Isolate from parallel workers sharing Remotion's bundle cache: this
+        // backend must own its bundle directory so the publicDir copy cannot
+        // be disturbed (CI failure diagnostics, run 40974153880).
+        bundleCaching: false,
+        onBundleReady: (serveUrl) => {
+          const assetsDir = path.join(serveUrl, "assets");
+          const listing = existsSync(assetsDir)
+            ? readdirSync(assetsDir).join(",")
+            : "<no assets dir>";
+          console.log(
+            `[audio-unified] bundle=${serveUrl} assets=[${listing}]`,
+          );
+        },
       });
 
       const artifact = await backend.render({

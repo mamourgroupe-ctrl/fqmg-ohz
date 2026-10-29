@@ -43,6 +43,14 @@ export interface LocalRenderBackendOptions {
    * forbids — verified empirically, D-027.)
    */
   publicDir?: string;
+  /**
+   * Disable Remotion's content-hash bundle cache. Parallel test workers
+   * bundling the same entry point share the cached directory otherwise,
+   * which makes per-backend publicDir copies collide (phase 7 debugging).
+   */
+  bundleCaching?: boolean;
+  /** Invoked once the bundle directory is ready (after the publicDir copy). */
+  onBundleReady?: (serveUrl: string) => void;
   /** Test seams. */
   bundleFn?: typeof bundle;
   selectCompositionFn?: typeof selectComposition;
@@ -105,6 +113,8 @@ export class RemotionLocalRenderBackend implements RenderBackend {
   private readonly scale: number;
   private readonly logLevel: "error" | "warn" | "info";
   private readonly publicDir?: string;
+  private readonly bundleCaching: boolean;
+  private readonly onBundleReady?: (serveUrl: string) => void;
   private readonly bundleFn: typeof bundle;
   private readonly selectCompositionFn: typeof selectComposition;
   private readonly renderMediaFn: typeof renderMedia;
@@ -119,6 +129,8 @@ export class RemotionLocalRenderBackend implements RenderBackend {
     this.scale = options.scale ?? DEFAULT_PREVIEW_SCALE;
     this.logLevel = options.logLevel ?? "error";
     this.publicDir = options.publicDir;
+    this.bundleCaching = options.bundleCaching ?? true;
+    this.onBundleReady = options.onBundleReady;
     this.bundleFn = options.bundleFn ?? bundle;
     this.selectCompositionFn = options.selectCompositionFn ?? selectComposition;
     this.renderMediaFn = options.renderMediaFn ?? renderMedia;
@@ -137,6 +149,7 @@ export class RemotionLocalRenderBackend implements RenderBackend {
       // the `@/*` alias from webpack-override.mjs does not apply), so the
       // unified entry.tsx fails with "Module not found: @/motion/...".
       // Webpack honors the override; this is D-026 in docs/decisions.md.
+      enableCaching: this.bundleCaching,
       ...(signal ? { signal } : {}),
     })
       .then(async (serveUrl) => {
@@ -147,6 +160,7 @@ export class RemotionLocalRenderBackend implements RenderBackend {
         if (this.publicDir) {
           await fsCp(this.publicDir, serveUrl, { recursive: true });
         }
+        this.onBundleReady?.(serveUrl);
         return serveUrl;
       })
       .catch((error: unknown) => {
