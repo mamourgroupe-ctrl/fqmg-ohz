@@ -399,3 +399,19 @@ allow-same-origin، CSP بلا شبكة وunsafe-eval محصور بالمعزو�
 - **الجرد:** 494 → 510 اختبارًا (+4 بوابة، +10 مزج/assess، +2 e2e) في 52
   ملفًا. محليًا: 507 نجح + 3 تخطٍّ (رندر المتصفح في sandbox معزول)؛
   typecheck/lint/audit 0، build OK.
+
+**اكتمال المرحلة 7 — التزامات ونتائج:**
+- الالتزامات: 7a32658 (A: البوابة الصوتية) → b5fb946 (B: المزج) →
+  dcaec5d/bed8dd8 (C: e2e + إعادة توجيه اختبارين) → 8f0d75d (D: docs) →
+  7012605/e5782a8/911e0c2/aa6e32b (دورات تشخيص CI) → 9e6dc71 (السبب الجذري).
+- **الجرد: 494 → 510** (+4 بوابة صوتية، +5 مزج، +5 assess، +2 e2e) في 52
+  ملفًا. محليًا 507 نجح + 3 تخطٍّ (متصفح)، typecheck/lint/audit 0، build OK.
+- **إثبات التنفيذ في CI (run 40975932431، commit 9e6dc71، SUCCESS):**
+  `[audio-unified-corrupt] EXECUTED: corrupt audio asset failed the render
+  loudly` + `[render-unified] EXECUTED: ffprobe verified 162x288 @30fps,
+  2.00s, 6KB, composition=FQMG-OHZ-Preview` — خطوة الاختبار نُفِّذت فعلًا
+  (FQMG_REQUIRE_RENDER_PIPELINE=1 يجعل التخطي فشلًا) و52/52 ملفات نجحت.
+  marker المسار السعيد الصوتي كان أُقصي بنافذة tail-5 فوُسّعت إلى -8 في
+  الالتزام التوثيقي اللاحق.
+- سبب دورات الفشل الأربع موثق في D-027 (خطأ `??=` على مهيآت سلاسل فارغة —
+  لا نظريات التخزين المؤقت/التنظيف التي تراجعت).
