@@ -67,6 +67,10 @@ jobs:
         env:
           FQMG_TEST_REDIS_URL: redis://127.0.0.1:6379
           FQMG_REQUIRE_REDIS_TESTS: "1"
+          # ubuntu-24.04 runners ship ffprobe and can download the Remotion
+          # headless browser: the unified-pipeline render test must EXECUTE
+          # here, not skip (missing prerequisites would fail the run).
+          FQMG_REQUIRE_RENDER_PIPELINE: "1"
 
       - name: Upload coverage report
         if: ${{ always() }}

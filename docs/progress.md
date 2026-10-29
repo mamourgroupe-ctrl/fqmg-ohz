@@ -306,3 +306,40 @@ allow-same-origin، CSP بلا شبكة وunsafe-eval محصور بالمعزو�
   مثبتة بالمتجه الرسمي لكن القراءة/الكتابة من مزود حقيقي تحتاج بيانات اعتماد
   المالك، وسلوك الكشف/التنظيف الدوري لـ TTL الفعلي (المهام تنتهي بـ TTL
   Redis؛ تنظيف الملفات المحلية يبقى دورة prune الحالية).
+
+## المرحلة 6 — توحيد البنية وفصل النشر (جارية)
+
+**الالتزام A (e8ef793) — فصل النشر عن البناء:**
+- `vercel.json`: `next build` فقط (لا remotion) — نشر Vercel لا ينتج أي أصل خارجي.
+- `scripts/deploy.mjs`: `--mode deploy` يتطلب المفاتيح ويفشل فورًا (exit 1) برسالة
+  صريحة عند غيابها؛ `--mode verify` (الافتراضي) للتحقق بلا نشر.
+- اسم الموقع الفعلي `fqmg-ohz` في `config.mjs` (بدل my-next-app)، وكل نقاط
+  الدخول (`deploy:lambda`, `remotion`, `render`, `studio`, `bundle`) تستهدف
+  `src/remotion/entry.tsx` (FQMG-OHZ-Preview، data-only). `npm run render`
+  ينتج `renders/animation.mp4`.
+
+**الالتزام B (81b0592) — حذف شيفرة التركيب القديم (نظرة grep أُريت للمالك قبل التنفيذ):**
+- 15 ملفًا حُذفت (‑1097 سطرًا): Root.tsx/DynamicComp.tsx، `compileCode` من
+  compiler.ts (لم يبقَ أي `new Function` خارج sandbox المرحلة 4)، مسارا HTTP
+  `/api/lambda/render|progress` + `src/lambda/api.ts` + `use-rendering.ts` +
+  مكونات AnimationPlayer غير المركّبة + `types/{schema,constants}.ts` +
+  سياستا Rate القديمتان.
+- التغطية حُفظت بإعادة التوجيه لا بالحذف: `fixCommonSyntaxErrors` عبر
+  `transpileGeneratedCode`؛ اختبار المرحلة 4 أثبت انتهاء المقيّم القديم
+  واستمرار مسار البيانات في sandbox المعزول end-to-end؛ api-auth يثبت أن وحدة
+  المسار المحذوفة لا يمكن استيرادها أصلًا. الجرد 494 → 491 (7 اختبارات
+  لمسارات محذوفة، موثقة في D-025). لا حذف صامت للتغطية.
+- فحص متبقٍ: grep على كل الرموز المحذوفة = إشارات تاريخية في الوثائق فقط.
+
+**اختبار تكامل المسار الموحد مع بوابة ffprobe (tests/render-unified-pipeline.test.ts):**
+- يقود القالب الحقيقي عبر المسار الإنتاجي كاملًا: MotionSpecificationSchema →
+  RemotionLocalRenderBackend (bundle لـ entry.tsx + اختيار FQMG-OHZ-Preview)
+  → `verifyRenderOutput` — بوابة ffprobe الإنتاجية نفسها التي تستخدمها حلقة QA.
+- يثبت عبر seams أن inputProps المرسلة data-only (`{ spec }` كما parseها
+  المخطط) والـ composition المختار هو FQMG-OHZ-Preview حصرًا.
+- الصدق البيئي: غياب ffprobe أو Chrome Headless Shell = تخطٍّ **مع سبب
+  مسجّل**، ومع `FQMG_REQUIRE_RENDER_PIPELINE=1` = فشل. محليًا (بيئة معزولة
+  بلا متصفح): اختبار ffprobe نُفّذ فعليًا (حزمة compositor Remotion تحمل
+  ffprobe n7.1 داخل node_modules) ورندر المتصفح تَخَطّى؛ في CI (ubuntu-24.04
+  + إنترنت مفتوح): `FQMG_REQUIRE_RENDER_PIPELINE=1` يجعل الرندر الكامل
+  ينفّذ فعلًا مع استدعاء ffprobe حقيقي.
