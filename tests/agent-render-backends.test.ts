@@ -100,7 +100,9 @@ describe("local Remotion render backend", () => {
     expect(bundleCalls[0].entryPoint).toBe(
       path.resolve(process.cwd(), "src/remotion/entry.tsx"),
     );
-    expect(bundleCalls[0].rspack).toBe(true);
+    // rspack is deliberately NOT enabled: it skips webpackOverride, so the
+    // `@/*` alias would never apply (D-026).
+    expect(bundleCalls[0].rspack).toBeUndefined();
     const override = bundleCalls[0].webpackOverride as (config: unknown) => {
       resolve: { alias: Record<string, string> };
     };

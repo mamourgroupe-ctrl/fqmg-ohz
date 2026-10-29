@@ -120,7 +120,11 @@ export class RemotionLocalRenderBackend implements RenderBackend {
       entryPoint: this.entryPoint,
       onProgress: () => undefined,
       webpackOverride,
-      rspack: true,
+      // Deliberately NOT rspack: Remotion's rspack bundler never invokes
+      // webpackOverride (verified: the override callback is not called and
+      // the `@/*` alias from webpack-override.mjs does not apply), so the
+      // unified entry.tsx fails with "Module not found: @/motion/...".
+      // Webpack honors the override; this is D-026 in docs/decisions.md.
       ...(signal ? { signal } : {}),
     }).catch((error: unknown) => {
       this.bundlePromise = undefined;

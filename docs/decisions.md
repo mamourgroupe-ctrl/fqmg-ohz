@@ -96,3 +96,12 @@
   أُثبت المسار بياناتُه end-to-end باختبار (transpile → run message →
   evaluate). تغطية `fixCommonSyntaxErrors` أعيد توجيهها عبر
   `transpileGeneratedCode` (نفس الخط بلا تقييم) — لا تغطية حُذفت صامتًا.
+
+- **D-026 (المرحلة 6):** إيقاف `rspack` في حزم Remotion كلها (محليًا وCLI
+  والنشر). مثبت بالتنفيذ: مع `rspack: true` لا يستدعي مجمّع Remotion
+  `webpackOverride` أصلًا (عداد الاستدعاء = 0)، فيسقط alias `@/*` الذي يعرّفه
+  `webpack-override.mjs` ويفشل bundle لـ entry.tsx بخطأ
+  `Module not found: @/motion/schemas/motion-specification` — وأعيد إنتاجه
+  محليًا بمكالمة `bundle()` مباشرة. مع webpack القياسي: نفس الاستدعاء ينجح
+  والـ override يطبق. `rspack` كان تسريعًا فقط؛ الأولوية للصحة. حُدّث
+  اختبار يؤكد تمرير `rspack: true` ليعكس السلوك الصحيح.
