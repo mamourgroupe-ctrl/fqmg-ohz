@@ -63,7 +63,12 @@ jobs:
         run: npm run lint
 
       - name: Test (vitest with v8 coverage, no thresholds yet)
-        run: npm run test:coverage
+        # tee the full output into an artifact: the Actions log receiver has
+        # been flaky (0-byte downloads), this guarantees the failure text.
+        shell: bash
+        run: |
+          set -eo pipefail
+          npm run test:coverage 2>&1 | tee /tmp/vitest-output.log
         env:
           FQMG_TEST_REDIS_URL: redis://127.0.0.1:6379
           FQMG_REQUIRE_REDIS_TESTS: "1"
@@ -71,6 +76,15 @@ jobs:
           # headless browser: the unified-pipeline render test must EXECUTE
           # here, not skip (missing prerequisites would fail the run).
           FQMG_REQUIRE_RENDER_PIPELINE: "1"
+
+      - name: Upload vitest output
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: vitest-output-${{ github.run_id }}
+          path: /tmp/vitest-output.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Upload coverage report
         if: ${{ always() }}
