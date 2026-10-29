@@ -83,3 +83,16 @@
   (المخزن المشترك يدير السعة عبر سياسات الحاوية). اختبار Redis محليًا ضد
   خادم مبني من المصدر (8.2.3) على 6399، وفي CI ضد خدمة `redis:7` مع
   `FQMG_REQUIRE_REDIS_TESTS=1` الذي يجعل الخادم غير المتاح **فشلًا** لا تخطيًا.
+
+- **D-025 (المرحلة 6):** الـ composition الرسمي والموحد هو المسار data-only
+  `src/remotion/entry.tsx` (FQMG-OHZ-Preview عبر MotionComposition): كل نقاط
+  الدخول (deploy:lambda، remotion/render/studio/bundle) تستهدفه. حُذفت شيفرة
+  التركيب القديم بالكامل: Root.tsx وDynamicComp.tsx، ودالة `compileCode`
+  (`new Function` في أي سياق)، ومسارا HTTP `/api/lambda/render|progress`
+  مع `src/lambda/api.ts` و`use-rendering.ts` ومكونات `AnimationPlayer`
+  (لم تكن مربوطة بأي صفحة منذ المرحلة 4)، و`types/{schema,constants}.ts`
+  القديمة، وسياستا Rate `lambda-render|lambda-progress`. يبقى التقييم
+  (`evaluateTranspiled`) حصرًا داخل إطار المعاينة المعزول من المرحلة 4، وقد
+  أُثبت المسار بياناتُه end-to-end باختبار (transpile → run message →
+  evaluate). تغطية `fixCommonSyntaxErrors` أعيد توجيهها عبر
+  `transpileGeneratedCode` (نفس الخط بلا تقييم) — لا تغطية حُذفت صامتًا.

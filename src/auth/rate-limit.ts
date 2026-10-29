@@ -25,8 +25,6 @@ export const RATE_POLICIES = {
   "voice-synthesize": { max: 10, windowMs: 60_000 },
   "voice-audio": { max: 60, windowMs: 60_000 },
   "agent-qa": { max: 5, windowMs: 300_000 },
-  "lambda-render": { max: 5, windowMs: 60_000 },
-  "lambda-progress": { max: 60, windowMs: 60_000 },
 } as const satisfies Record<string, RatePolicy>;
 
 export type RatePolicyName = keyof typeof RATE_POLICIES;

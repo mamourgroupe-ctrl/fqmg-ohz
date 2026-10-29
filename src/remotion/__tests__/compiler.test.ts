@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ensureRequiredImports, extractComponentBody, removeUnusedImports, fixCommonSyntaxErrors, compileCode } from "../compiler";
+import { ensureRequiredImports, extractComponentBody, removeUnusedImports, fixCommonSyntaxErrors, transpileGeneratedCode } from "../compiler";
 
 describe("ensureRequiredImports", () => {
   it("adds import for code without imports", () => {
@@ -261,7 +261,7 @@ describe("fixCommonSyntaxErrors", () => {
   });
 
   it("compiles components with a malformed destructured transition callback", () => {
-    const result = compileCode(`export const MyAnimation = () => {
+    const result = transpileGeneratedCode(`export const MyAnimation = () => {
   const render = ({ transition } => (
     <div style={{ opacity: transition.progress }} />
   );
@@ -269,17 +269,17 @@ describe("fixCommonSyntaxErrors", () => {
 };`);
 
     expect(result.error).toBeNull();
-    expect(result.Component).not.toBeNull();
+    expect(result.transpiled).toBeTruthy();
   });
 
   it("repairs a split durationInFrames identifier before compiling", () => {
-    const result = compileCode(`export const MyAnimation = () => {
+    const result = transpileGeneratedCode(`export const MyAnimation = () => {
   const config = { durationIn Frames: 90 };
   return <div>{config.durationIn Frames}</div>;
 };`);
 
     expect(result.error).toBeNull();
-    expect(result.Component).not.toBeNull();
+    expect(result.transpiled).toBeTruthy();
   });
 
   it("repairs split camel-case identifiers without changing strings or comments", () => {
@@ -289,7 +289,7 @@ describe("fixCommonSyntaxErrors", () => {
   // frameAtStartOf KenBurns
   return <div>{frameAtStartOf KenBurns}</div>;
 };`;
-    const result = compileCode(input);
+    const result = transpileGeneratedCode(input);
     const repaired = fixCommonSyntaxErrors(input);
 
     expect(repaired).toContain("const frameAtStartOfKenBurns =");
@@ -298,7 +298,7 @@ describe("fixCommonSyntaxErrors", () => {
     expect(repaired).toContain("// frameAtStartOf KenBurns");
     expect(fixCommonSyntaxErrors(repaired)).toBe(repaired);
     expect(result.error).toBeNull();
-    expect(result.Component).not.toBeNull();
+    expect(result.transpiled).toBeTruthy();
   });
 
   it("adds missing Remotion frame and video-config bindings before preview compilation", () => {
@@ -312,7 +312,7 @@ describe("fixCommonSyntaxErrors", () => {
     expect(body).toContain(
       "const { fps, durationInFrames } = useVideoConfig();",
     );
-    expect(compileCode(code).error).toBeNull();
+    expect(transpileGeneratedCode(code).error).toBeNull();
   });
 
   it("does not duplicate Remotion bindings already declared by the component", () => {
@@ -337,7 +337,7 @@ describe("fixCommonSyntaxErrors", () => {
   });
 
   it("compiles multiple interpolate calls after adding clamp options", () => {
-    const result = compileCode(`export const MyAnimation = () => {
+    const result = transpileGeneratedCode(`export const MyAnimation = () => {
   const LOGO_DURATION = 30;
   const ABOUT_DURATION = 30;
   const STRENGTHS_DURATION = 30;
@@ -349,7 +349,7 @@ describe("fixCommonSyntaxErrors", () => {
 };`);
 
     expect(result.error).toBeNull();
-    expect(result.Component).not.toBeNull();
+    expect(result.transpiled).toBeTruthy();
   });
 
   it("handles nested arguments and multiline calls without changing unrelated text", () => {
@@ -388,7 +388,7 @@ const unrelated = customInterpolate(frame, [0, 60], [0, 1]);`;
   });
 
   it("compiles nested multiline calls with misplaced options", () => {
-    const result = compileCode(`export const MyAnimation = () => {
+    const result = transpileGeneratedCode(`export const MyAnimation = () => {
   const frame = useCurrentFrame();
   const progress = interpolate(
     Math.max(0, frame),
@@ -402,7 +402,7 @@ const unrelated = customInterpolate(frame, [0, 60], [0, 1]);`;
 };`);
 
     expect(result.error).toBeNull();
-    expect(result.Component).not.toBeNull();
+    expect(result.transpiled).toBeTruthy();
   });
 
   it("does not add clamp when already present", () => {

@@ -90,11 +90,16 @@ describe("phase 3: every API route rejects unauthenticated callers with 401", ()
     expect(response.status).toBe(401);
   });
 
-  it("returns 401 on POST /api/lambda/render and /api/lambda/progress without a session", async () => {
-    const { POST: renderPost } = await import("@/app/api/lambda/render/route");
-    const { POST: progressPost } = await import("@/app/api/lambda/progress/route");
-    expect((await renderPost(requestFor("POST", "/api/lambda/render", {}))).status).toBe(401);
-    expect((await progressPost(requestFor("POST", "/api/lambda/progress", {}))).status).toBe(401);
+  it("the legacy /api/lambda/* render routes are gone (phase 6 unification)", async () => {
+    // the routes were removed with the old composition; importing their module must fail
+    const deletedRouteSpecifier = "@/app/api/lambda/render/route";
+    let importFailed = false;
+    try {
+      await import(deletedRouteSpecifier);
+    } catch {
+      importFailed = true;
+    }
+    expect(importFailed).toBe(true);
   });
 
   it("never accepts identity from client-controlled headers or body", async () => {

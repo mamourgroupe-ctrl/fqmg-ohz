@@ -18,8 +18,10 @@
 | `/api/agent/qa` | POST | مطلوبة | `agent-qa` 5/5د | **مدفوع محتمل**: نقد بصري/إصلاح + عرض | مهمة مملوكة لصاحبها؛ dedupe لكل مستخدم |
 | `/api/agent/qa/{jobId}` | GET / DELETE | مطلوبة | — (استعلام) | لا شيء | **403** لمهمة مستخدم آخر |
 | `/api/agent/qa/{jobId}/preview` | GET | مطلوبة | — | قراءة ملف محلي | **403** قبل كشف الوجود أصلًا |
-| `/api/lambda/render` | POST | مطلوبة (داخل `executeApi`) | `lambda-render` 5/د | **مدفوع**: عرض Remotion Lambda | — |
-| `/api/lambda/progress` | POST | مطلوبة (داخل `executeApi`) | `lambda-progress` 60/د | استعلام حالة | — |
+> **ملاحظة (المرحلة 6):** مسارا HTTP القديمان `/api/lambda/render` و
+> `/api/lambda/progress` (تركيب `DynamicComp` القديم عبر `inputProps`) حُذفا
+> مع الشيفرة الميتة للتركيب القديم. عرض Lambda يتم حصريًا عبر محركات العرض
+> (src/render/lambda) في حلقة QA أو عبر `npm run deploy:lambda` للبنية التحتية.
 
 حدود إضافية: `ip-global` (120/د لكل IP) في `src/proxy.ts` قبل فحص الجلسة، لتخفيف الضرب
 العام قبل أي معالجة.

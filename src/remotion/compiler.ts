@@ -34,12 +34,10 @@ import { loadFont as loadTajawal } from "@remotion/google-fonts/Tajawal";
 // ─── Preload Arabic Fonts (available at render time) ───
 loadCairo(); // preload Cairo
 loadTajawal(); // preload Tajawal
-export interface CompilationResult {
-  Component: React.ComponentType | null;
-  error: string | null;
-  /** Set when the phase-4 sandbox validator rejected the code. */
-  violations?: CodeViolation[];
-}
+/** Phase 6: the old `compileCode` path (new Function in any context) is gone.
+ * The ONLY remaining evaluators are:
+ *  - transpileGeneratedCode: parent-side validate+transpile (pure data), and
+ *  - evaluateTranspiled: runs INSIDE the opaque-origin sandbox frame only. */
 
 interface SourceEdit {
   start: number;
@@ -879,42 +877,6 @@ export function extractComponentBody(code: string): string {
   return addMissingRemotionHookBindings(
     cleaned.replace(/^\s*export\s+/gm, ""),
   );
-}
-
-// Standalone compile function for use outside React components.
-//
-// LEGACY (phase 4, tagged): this still evaluates generated code with
-// `new Function` — it is ONLY acceptable inside the Remotion renderer context
-// (headless browser / Lambda via DynamicComp), never in the interactive page.
-// The main-context preview must go through src/sandbox/SandboxedPreview +
-// transpileGeneratedCode instead. Malicious code is refused by the phase-4
-// AST validator before any evaluation, in both contexts.
-export function compileCode(code: string): CompilationResult {
-  const prepared = transpileGeneratedCode(code);
-  if (prepared.error !== null || prepared.transpiled === null) {
-    return {
-      Component: null,
-      error: prepared.error,
-      violations: prepared.violations,
-    };
-  }
-
-  try {
-    const evaluated = evaluateTranspiled(prepared.transpiled);
-
-    if (typeof evaluated !== "function") {
-      return {
-        Component: null,
-        error: "Code must be a function that returns a React component",
-      };
-    }
-
-    return { Component: evaluated as React.ComponentType, error: null };
-  } catch (error) {
-    const errorMessage =
-      error instanceof Error ? error.message : "Unknown compilation error";
-    return { Component: null, error: errorMessage };
-  }
 }
 
 export interface TranspiledGeneratedCode {

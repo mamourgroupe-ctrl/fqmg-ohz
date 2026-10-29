@@ -7,7 +7,10 @@ import {
   validateGeneratedCode,
   type CodeViolation,
 } from "@/sandbox/code-validator";
-import { compileCode, transpileGeneratedCode } from "@/remotion/compiler";
+import {
+  transpileGeneratedCode,
+  evaluateTranspiled,
+} from "@/remotion/compiler";
 import {
   SANDBOX_CSP,
   buildSandboxFrameProps,
@@ -124,18 +127,41 @@ function label0(label: string): string {
 }
 
 describe("phase 4: compiler gate — malicious code never reaches execution", () => {
-  it("compileCode still compiles a benign component (renderer context, gated)", () => {
-    const result = compileCode(BENIGN);
-    expect(result.error).toBeNull();
-    expect(typeof result.Component).toBe("function");
+  it("compileCode is gone — the any-context evaluator no longer exists (phase 6)", async () => {
+    const compiler = (await import("@/remotion/compiler")) as unknown as Record<string, unknown>;
+    expect(compiler.compileCode).toBeUndefined();
+    expect(typeof compiler.evaluateTranspiled).toBe("function");
+    expect(typeof compiler.transpileGeneratedCode).toBe("function");
+  });
+
+  it("the sandbox data path survives the removal end-to-end", () => {
+    // parent: validate + transpile (pure data)
+    const prepared = transpileGeneratedCode(BENIGN);
+    expect(prepared.error).toBeNull();
+    // parent -> frame: a structured run message over postMessage
+    const message = parseSandboxMessage({
+      type: "fqmg-sandbox/run",
+      transpiled: prepared.transpiled,
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      durationInFrames: 90,
+    });
+    expect(message?.type).toBe("fqmg-sandbox/run");
+    // frame: evaluation happens ONLY inside the sandbox realm
+    const evaluated = evaluateTranspiled(
+      (message as { transpiled: string }).transpiled,
+    );
+    expect(typeof evaluated).toBe("function");
   });
 
   it.each(MALICIOUS_PROBES.slice(0, 8))(
-    "compileCode refuses: %s",
+    "transpileGeneratedCode refuses: %s",
     (_label, code) => {
-      const result = compileCode(code);
-      expect(result.Component).toBeNull();
+      const result = transpileGeneratedCode(code);
+      expect(result.transpiled).toBeNull();
       expect(result.error).toMatch(/security policy|not allowed/i);
+      expect(result.violations?.length).toBeGreaterThan(0);
     },
   );
 
