@@ -373,3 +373,29 @@ allow-same-origin، CSP بلا شبكة وunsafe-eval محصور بالمعزو�
   `[render-unified] EXECUTED: ffprobe verified 162x288 @30fps, 2.00s, 6KB,
   composition=FQMG-OHZ-Preview` — الخطوة **نُفّذت** فعلًا (ملف الاختبار 20.7s)
   عبر `verifyRenderOutput` الإنتاجية، وليست متخطّاة.
+
+## المرحلة 7 — دمج الصوت في الفيديو النهائي (مكتملة)
+
+- **7a32658 (A):** بوابة ffprobe صوتية-الوعي: `verifyRenderOutput(filePath,
+  { expectAudio, audioToleranceSeconds=0.5 })` — يوجَد stream صوتي ومطابقة
+  مدته لمدة الفيديو ضمن الهامش، وإلا فشل مغلق برسائل صريحة؛
+  `VerifiedMediaOutput` يبلّغ عن الـ stream الصوتي؛ حلقة الوكيل تمرر
+  `expectAudio` من المواصفة (توافق عكسي: الرندرات الصامتة كما هي). +4
+  اختبارات بـ fixtures ffmpeg حقيقية (كُشف أن ffmpeg المضمّن بلا lavfi
+  فيديو → بناء الفيديو من PNG، والصوت من sine).
+- **b5fb946 (B):** المزج نفسه: `AudioTracksView` في MotionComposition على
+  الخط الزمني المطلق، مستويات/تلاشٍ عبر `audioTrackVolumeAt` النقية (5
+  اختبارات)، رفع الرفض الشامل في المحوّل مع إبقاء normalize/ducking
+  مرفوضَين (5 اختبارات)، `publicDir` في الـ backend لحل /assets الثابتة.
+  اختبار القديم في agent-render-backends أعيد توجيهه (normalize مثال
+  الرفض الباقي).
+- **bed8dd8:** إعادة توجيه اختبارين ثبّتا الرفض القديم (remotion-adapter +
+  voice-motion-integration) للعقد الجديد — اكتُشفا بتشغيل المجموعة الكاملة.
+- **dcaec5d (C):** e2e صوتي (tests/render-audio-pipeline.test.ts): tone مولّد
+  → publicDir → رندر موحد → بوابة expectAudio تتحقق من stream صوتي مطابق؛
+  وأصل تالف (2KB عشوائي) يفشل render-failed بوضوح. بوابة المتصفح: تخطٍّ
+  محلي مسبب (`[audio-unified*] SKIPPED`) وإلزام في CI
+  (FQMG_REQUIRE_RENDER_PIPELINE=1) مع annotations للإثبات.
+- **الجرد:** 494 → 510 اختبارًا (+4 بوابة، +10 مزج/assess، +2 e2e) في 52
+  ملفًا. محليًا: 507 نجح + 3 تخطٍّ (رندر المتصفح في sandbox معزول)؛
+  typecheck/lint/audit 0، build OK.
