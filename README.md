@@ -205,10 +205,11 @@ npm run build
 > `Retry-After`, and each user gets their own daily budget ceiling on top of the global
 > daily cap — see [`docs/api-access.md`](docs/api-access.md) for the full route ×
 > identity × rate table. `AUTH_ENABLED=0` is a documented local-development escape.
-> Still single-instance: the rate-limit counters and budget ledger are process-local
-> memory (correct for one instance; multiple replicas need the phase-5 Redis store),
-> the voice cache/job store are filesystem state, and a browser login UI is planned
-> for phase 8.
+> Still single-instance by default: rate-limit counters stay process-local. Phase 5
+> added shared backends — set `FQMG_REDIS_URL` (atomic Lua budget + shared job
+> registry, fail-closed when unreachable) and `VOICE_CACHE_STORE=s3` with the
+> `FQMG_S3_*` variables to run multiple replicas; see `docs/api-access.md`.
+> A browser login UI is planned for phase 8.
 
 ---
 
