@@ -198,7 +198,10 @@ export interface AgentLoopDependencies {
   priceBook: PriceBook;
   /** Test seams; each defaults to the production implementation. */
   materialize?: typeof defaultMaterializeArtifact;
-  validateMedia?: (filePath: string) => Promise<MediaValidation>;
+  validateMedia?: (
+    filePath: string,
+    options?: { expectAudio?: boolean },
+  ) => Promise<MediaValidation>;
   extractFrames?: (request: FrameExtractionRequest, options: object) => Promise<FrameExtractionResult>;
   critique?: typeof defaultCritiqueFrames;
   now?: () => number;
@@ -264,8 +267,8 @@ export async function runAgentLoop(
   const critique = dependencies.critique ?? defaultCritiqueFrames;
   const validateMedia =
     dependencies.validateMedia ??
-    (async (filePath: string): Promise<MediaValidation> =>
-      mediaSummary(await verifyRenderOutput(filePath)));
+    (async (filePath: string, options?: { expectAudio?: boolean }): Promise<MediaValidation> =>
+      mediaSummary(await verifyRenderOutput(filePath, options)));
   const workDir = dependencies.workDir ?? defaultWorkDir;
   const rubric = getCritiqueRubricLines();
 
@@ -476,7 +479,9 @@ export async function runAgentLoop(
     report("validating", iteration);
     let media: MediaValidation;
     try {
-      media = await validateMedia(materialized.filePath);
+      media = await validateMedia(materialized.filePath, {
+        expectAudio: specification.audio.tracks.length > 0,
+      });
     } catch (error) {
       record.failureReason = "validation-failed";
       failureReason = "validation-failed";

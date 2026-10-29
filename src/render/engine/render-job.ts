@@ -37,6 +37,12 @@ export const RenderJobSchema = z
 
 export type RenderJob = z.infer<typeof RenderJobSchema>;
 
+export interface VerifiedAudioOutput {
+  streamCount: number;
+  codec: string;
+  durationSeconds: number;
+}
+
 export interface VerifiedMediaOutput {
   absolutePath: string;
   sizeBytes: number;
@@ -45,6 +51,15 @@ export interface VerifiedMediaOutput {
   width: number;
   height: number;
   fps: number;
+  /** Present only when the container carries at least one audio stream. */
+  audio?: VerifiedAudioOutput;
+}
+
+export interface VerifyRenderOutputOptions {
+  /** Require a decodable audio stream whose duration matches the video. */
+  expectAudio?: boolean;
+  /** Allowed |audio - video| duration divergence, seconds (default 0.5). */
+  audioToleranceSeconds?: number;
 }
 
 interface FfprobeOutput {
@@ -54,6 +69,8 @@ interface FfprobeOutput {
   };
   streams?: Array<{
     codec_type?: string;
+    codec_name?: string;
+    duration?: string;
     width?: number;
     height?: number;
     avg_frame_rate?: string;
@@ -66,6 +83,21 @@ function parseFrameRate(value: string | undefined): number {
   if (!Number.isFinite(numerator)) return 0;
   if (denominator === undefined) return numerator;
   return denominator > 0 ? numerator / denominator : 0;
+}
+
+export function getFfmpegExecutable(): string {
+  try {
+    const bundled = RenderInternals.getExecutablePath({
+      type: "ffmpeg",
+      indent: false,
+      logLevel: "error",
+      binariesDirectory: null,
+    });
+    if (existsSync(bundled)) return bundled;
+  } catch {
+    // Fall back to a system ffmpeg for platforms without a Remotion binary package.
+  }
+  return "ffmpeg";
 }
 
 export function getFfprobeExecutable(): string {
@@ -89,13 +121,14 @@ function inspectVideoWithFfprobe(filePath: string): Promise<{
   width: number;
   height: number;
   fps: number;
+  audio?: VerifiedAudioOutput;
 }> {
   return new Promise((resolve, reject) => {
     execFile(
       getFfprobeExecutable(),
       [
         "-v", "error",
-        "-show_entries", "format=format_name,duration:stream=codec_type,width,height,avg_frame_rate",
+        "-show_entries", "format=format_name,duration:stream=codec_type,codec_name,width,height,avg_frame_rate,duration",
         "-of", "json",
         filePath,
       ],
@@ -121,7 +154,25 @@ function inspectVideoWithFfprobe(filePath: string): Promise<{
             reject(new Error("ffprobe found no valid video stream, dimensions, frame rate, or duration."));
             return;
           }
-          resolve({ formatName, durationSeconds, width, height, fps });
+          const audioStreams = (probe.streams ?? []).filter((stream) => stream.codec_type === "audio");
+          const primaryAudio = audioStreams[0];
+          const audioStreamDuration = Number(primaryAudio?.duration ?? durationSeconds);
+          resolve({
+            formatName,
+            durationSeconds,
+            width,
+            height,
+            fps,
+            audio: primaryAudio
+              ? {
+                  streamCount: audioStreams.length,
+                  codec: primaryAudio.codec_name ?? "unknown",
+                  durationSeconds: Number.isFinite(audioStreamDuration) && audioStreamDuration > 0
+                    ? audioStreamDuration
+                    : durationSeconds,
+                }
+              : undefined,
+          });
         } catch {
           reject(new Error("ffprobe returned an invalid media report."));
         }
@@ -134,7 +185,10 @@ function inspectVideoWithFfprobe(filePath: string): Promise<{
  * Requires a real MP4/WebM file and a successful ffprobe report with a video stream.
  * If ffprobe is missing, the operation fails closed. Codec and visual QC remain later-phase work.
  */
-export async function verifyRenderOutput(filePath: string): Promise<VerifiedMediaOutput> {
+export async function verifyRenderOutput(
+  filePath: string,
+  options: VerifyRenderOutputOptions = {},
+): Promise<VerifiedMediaOutput> {
   const absolutePath = path.resolve(filePath);
   const extension = path.extname(absolutePath).toLowerCase();
   if (extension !== ".mp4" && extension !== ".webm") {
@@ -154,6 +208,21 @@ export async function verifyRenderOutput(filePath: string): Promise<VerifiedMedi
     throw new Error("The output extension does not match the detected video container.");
   }
 
+  if (options.expectAudio) {
+    const tolerance = options.audioToleranceSeconds ?? 0.5;
+    if (!probe.audio) {
+      throw new Error(
+        "The render output carries no audio stream while the project mixes audio tracks.",
+      );
+    }
+    if (Math.abs(probe.audio.durationSeconds - probe.durationSeconds) > tolerance) {
+      throw new Error(
+        `The audio stream duration (${probe.audio.durationSeconds.toFixed(2)}s) diverges from ` +
+          `the video duration (${probe.durationSeconds.toFixed(2)}s) beyond the ${tolerance}s tolerance.`,
+      );
+    }
+  }
+
   return {
     absolutePath,
     sizeBytes: fileStats.size,
@@ -162,6 +231,7 @@ export async function verifyRenderOutput(filePath: string): Promise<VerifiedMedi
     width: probe.width,
     height: probe.height,
     fps: probe.fps,
+    ...(probe.audio ? { audio: probe.audio } : {}),
   };
 }
 
@@ -169,8 +239,9 @@ export async function verifyRenderOutput(filePath: string): Promise<VerifiedMedi
 export async function completeRenderJobWithOutput(
   job: Omit<RenderJob, "status" | "progress" | "output" | "error" | "updatedAt">,
   filePath: string,
+  options: VerifyRenderOutputOptions = {},
 ): Promise<RenderJob> {
-  const verified = await verifyRenderOutput(filePath);
+  const verified = await verifyRenderOutput(filePath, options);
   const now = new Date().toISOString();
   return RenderJobSchema.parse({
     ...job,
