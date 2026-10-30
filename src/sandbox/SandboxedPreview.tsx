@@ -183,7 +183,7 @@ export const SandboxedPreview = forwardRef<SandboxedPreviewHandle, SandboxedPrev
             className="text-xs text-muted-foreground"
             title="Generated code runs inside an isolated iframe: opaque origin, no cookies, no network."
           >
-            Sandboxed legacy preview — isolated origin, no network
+            Sandboxed preview — isolated origin, no network
           </span>
           {onAspectRatioChange ? (
             <select
