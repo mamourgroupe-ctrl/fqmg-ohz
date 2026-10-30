@@ -113,5 +113,5 @@ export const ErrorDisplay: React.FC<ErrorDisplayProps> = ({
   );
 };
 
-// ErrorType is still used by AnimationPlayer for its interface
+// ErrorType is shared by the chat surface and the generate page
 export type ErrorType = "compilation" | "api" | "validation" | "truncated";

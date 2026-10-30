@@ -41,7 +41,7 @@ export async function GET(
   }
 
   const runtime = getAgentRuntime();
-  const job = runtime.store.getJob(jobId);
+  const job = await runtime.store.getJob(jobId);
   // Ownership is checked before existence so another user's job reveals nothing.
   if (job && isAuthEnforced() && job.owner && job.owner !== auth.user.username) {
     return forbiddenResponse();

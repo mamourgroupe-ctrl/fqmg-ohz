@@ -172,9 +172,18 @@ npm run deploy
 ```
 
 A successful render is only reported after a real `.mp4`/`.webm` file exists and passes the
-`ffprobe` gate (container, one video stream, dimensions, frame rate, positive duration). Audio
-tracks are still rejected by the Remotion adapter: audio mixing is not implemented, so audio-bearing
-projects fail closed.
+`ffprobe` gate (container, one video stream, dimensions, frame rate, positive duration). Since
+phase 7 the gate is also audio-aware: when a project mixes audio tracks, the output must carry
+a decodable audio stream whose duration matches the video within a 0.5s tolerance.
+
+Audio mixing is implemented in the unified composition (`<Audio>` on the absolute timeline):
+per-track `startFrame`/`durationInFrames` timing, `gain` × `masterVolume` levels, and linear
+`fadeInFrames`/`fadeOutFrames` envelopes. Still fail-closed by design: `audio.normalize` and
+`audio.ducking` are rejected with explicit reasons, tracks must reference an existing
+audio/video asset (schema-enforced), a missing/unresolved asset fails the render loudly, and
+audio sources must resolve at the serve origin (`https://…` or app-relative `/assets/`,
+`/uploads/`, `/api/voice/audio/{uuid}` paths — the latter resolve against the app origin, not
+a separately deployed Lambda bundle).
 
 ---
 
@@ -205,10 +214,11 @@ npm run build
 > `Retry-After`, and each user gets their own daily budget ceiling on top of the global
 > daily cap — see [`docs/api-access.md`](docs/api-access.md) for the full route ×
 > identity × rate table. `AUTH_ENABLED=0` is a documented local-development escape.
-> Still single-instance: the rate-limit counters and budget ledger are process-local
-> memory (correct for one instance; multiple replicas need the phase-5 Redis store),
-> the voice cache/job store are filesystem state, and a browser login UI is planned
-> for phase 8.
+> Still single-instance by default: rate-limit counters stay process-local. Phase 5
+> added shared backends — set `FQMG_REDIS_URL` (atomic Lua budget + shared job
+> registry, fail-closed when unreachable) and `VOICE_CACHE_STORE=s3` with the
+> `FQMG_S3_*` variables to run multiple replicas; see `docs/api-access.md`.
+> A browser login UI is planned for phase 8.
 
 ---
 

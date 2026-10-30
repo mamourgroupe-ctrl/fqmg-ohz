@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { JobStateRecord, JobStateStore } from "@/agent/job-state-store";
 import { z } from "zod";
 import { PublicArtifactSchema, removeMaterializedFile } from "@/agent/artifact";
 import { sanitizeDiagnosticText } from "@/agent/redaction";
@@ -54,7 +55,8 @@ export const AgentJobBudgetViewSchema = z.object({
   dailyLimitUsd: z.number().nonnegative(),
   taskLimitUsd: z.number().nonnegative(),
   activeReservations: z.number().int().nonnegative(),
-  enforcement: z.literal("process-local"),
+  // phase 5: the budget snapshot may come from the shared Redis backend
+  enforcement: z.enum(["process-local", "shared-redis"]),
   invoiceGuarantee: z.literal(false),
 });
 
@@ -180,6 +182,44 @@ export interface AgentJobStoreOptions {
   now?: () => number;
   /** Test seam for artifact cleanup. */
   removeFile?: (filePath: string) => Promise<void>;
+  /** Phase 5: when set, registry state is mirrored to the shared store. */
+  stateStore?: JobStateStore;
+}
+
+function stateRecordOf(job: AgentJobRecord): JobStateRecord {
+  return {
+    jobId: job.jobId,
+    taskId: job.taskId,
+    dedupeKey: job.dedupeKey,
+    ...(job.owner ? { owner: job.owner } : {}),
+    status: job.status,
+    stage: job.stage,
+    progress: job.progress,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    result: job.result,
+    error: job.error,
+    localPaths: job.localPaths,
+  };
+}
+
+function jobRecordFromState(state: JobStateRecord): AgentJobRecord {
+  return {
+    jobId: state.jobId,
+    taskId: state.taskId,
+    dedupeKey: state.dedupeKey,
+    ...(state.owner ? { owner: state.owner } : {}),
+    status: state.status,
+    stage: state.stage as AgentJobRecord["stage"],
+    progress: state.progress,
+    createdAt: state.createdAt,
+    updatedAt: state.updatedAt,
+    controller: new AbortController(),
+    result: state.result,
+    view: null,
+    error: state.error,
+    localPaths: state.localPaths,
+  };
 }
 
 function localPathsOf(result: AgentLoopResult): string[] {
@@ -256,15 +296,27 @@ export class AgentJobStore {
   private readonly maxJobs: number;
   private readonly now: () => number;
   private readonly removeFile: (filePath: string) => Promise<void>;
+  private readonly stateStore?: JobStateStore;
 
   constructor(options: AgentJobStoreOptions) {
     this.ttlMs = options.ttlMs;
     this.maxJobs = options.maxJobs ?? 32;
     this.now = options.now ?? Date.now;
     this.removeFile = options.removeFile ?? ((filePath: string) => removeMaterializedFile(filePath, {}));
+    this.stateStore = options.stateStore;
   }
 
-  /** Refuses a duplicate active request for the same dedupe key. */
+  /** "process-local" or "shared-redis" (phase 5). */
+  get sharedStateKind(): "process-local" | "shared-redis" {
+    return this.stateStore?.kind ?? "process-local";
+  }
+
+  private mirror(job: AgentJobRecord): void {
+    if (!this.stateStore) return;
+    void this.stateStore.put(stateRecordOf(job), this.ttlMs + 60_000).catch(() => undefined);
+  }
+
+  /** Refuses a duplicate active request for the same dedupe key (this instance). */
   findActiveByDedupeKey(dedupeKey: string): AgentJobRecord | undefined {
     this.prune();
     return [...this.jobs.values()].find(
@@ -272,11 +324,18 @@ export class AgentJobStore {
     );
   }
 
-  startJob(input: StartAgentJobInput): AgentJobRecord {
+  async startJob(input: StartAgentJobInput): Promise<AgentJobRecord> {
     this.prune();
 
     if (this.findActiveByDedupeKey(input.dedupeKey)) {
       throw new AgentJobConflictError();
+    }
+    // Phase 5: dedupe across instances through the shared registry.
+    if (this.stateStore) {
+      const sharedActiveId = await this.stateStore.findActiveIdByDedupeKey(input.dedupeKey);
+      if (sharedActiveId !== undefined && !this.jobs.has(sharedActiveId)) {
+        throw new AgentJobConflictError();
+      }
     }
     const activeJobs = [...this.jobs.values()].filter((job) =>
       ACTIVE_JOB_STATUSES.includes(job.status),
@@ -309,13 +368,33 @@ export class AgentJobStore {
       localPaths: [],
     };
     this.jobs.set(jobId, job);
+    this.mirror(job);
 
+    let lastMirrorAt = this.now();
     const onProgress = (progress: AgentProgress): void => {
       job.status = "running";
       job.stage = progress.stage;
       job.progress = progress.progress;
       job.updatedAt = this.now();
+      // throttle the shared-store mirror to ~2 writes/second per job
+      if (this.stateStore && this.now() - lastMirrorAt >= 500) {
+        lastMirrorAt = this.now();
+        this.mirror(job);
+      }
     };
+
+    // Phase 5: honor cross-instance cancel requests while the job runs here.
+    let cancelPoller: ReturnType<typeof setInterval> | null = null;
+    if (this.stateStore) {
+      cancelPoller = setInterval(() => {
+        void this.stateStore!.isCancelRequested(jobId).then((requested) => {
+          if (requested) this.cancelJob(jobId);
+        });
+      }, 1_200);
+      if (typeof cancelPoller === "object" && cancelPoller && "unref" in cancelPoller) {
+        (cancelPoller as { unref: () => void }).unref();
+      }
+    }
 
     void (async () => {
       job.status = "running";
@@ -341,15 +420,34 @@ export class AgentJobStore {
       } finally {
         job.updatedAt = this.now();
         job.view = null;
+        if (cancelPoller) clearInterval(cancelPoller);
+        this.mirror(job);
       }
     })();
 
     return job;
   }
 
-  getJob(jobId: string): AgentJobRecord | undefined {
+  /**
+   * Looks a job up locally, then in the shared registry (phase 5): the job
+   * may live on another instance or have survived a restart here. A shared
+   * record has no live controller; polling and view building work, and
+   * cancellation goes through the shared flag.
+   */
+  async getJob(jobId: string): Promise<AgentJobRecord | undefined> {
     this.prune();
-    return this.jobs.get(jobId);
+    const local = this.jobs.get(jobId);
+    if (local) return local;
+    if (this.stateStore) {
+      const state = await this.stateStore.get(jobId);
+      if (state) {
+        const record = jobRecordFromState(state);
+        // cache the hydrated record so subsequent polls and cancel checks are local
+        this.jobs.set(state.jobId, record);
+        return record;
+      }
+    }
+    return undefined;
   }
 
   cancelJob(jobId: string): boolean {
@@ -362,9 +460,29 @@ export class AgentJobStore {
       job.error = "The job was cancelled at the caller's request.";
       job.updatedAt = this.now();
       job.controller.abort(new Error("cancelled"));
+      this.mirror(job);
       return true;
     }
     return false;
+  }
+
+  /**
+   * Phase 5: cancel through the shared registry. Returns true when the job
+   * was cancelled HERE, or a cross-instance cancel request was recorded.
+   */
+  async cancelJobAcrossInstances(jobId: string): Promise<boolean> {
+    if (this.cancelJob(jobId)) return true;
+    if (!this.stateStore) return false;
+    const shared = await this.stateStore.get(jobId);
+    if (!shared || !ACTIVE_JOB_STATUSES.includes(shared.status)) return false;
+    // mark it cancelled in the shared registry AND flag the owner instance;
+    // if the owner is dead, the cancelled record is still the truth others see.
+    await this.stateStore.setCancelRequested(jobId, this.ttlMs + 60_000);
+    await this.stateStore.put(
+      { ...shared, status: "cancelled", stage: "completed", progress: 1, error: "The job was cancelled at the caller's request.", updatedAt: this.now() },
+      this.ttlMs + 60_000,
+    );
+    return true;
   }
 
   /** Removes expired jobs and their retained local artifacts. Returns how many were removed. */

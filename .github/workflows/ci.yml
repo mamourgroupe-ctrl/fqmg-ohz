@@ -29,6 +29,19 @@ jobs:
     name: gates
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # Phase 5: the shared-state suites (tests/shared-state.test.ts) run against
+    # a real Redis; FQMG_REQUIRE_REDIS_TESTS=1 makes an unreachable server FAIL
+    # instead of silently skipping, so a broken service can never fake green.
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -50,7 +63,53 @@ jobs:
         run: npm run lint
 
       - name: Test (vitest with v8 coverage, no thresholds yet)
-        run: npm run test:coverage
+        # The Actions log/artifact receivers can be unreachable for some
+        # clients, so on failure the relevant lines are re-emitted as
+        # ::error:: annotations — those stay readable through the checks API.
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:coverage 2>&1 | tee /tmp/vitest-output.log
+          rc=$?
+          # Defense-in-depth: everything re-emitted as an annotation passes a
+          # redaction filter first. The CI environment holds no secrets at all
+          # (only a localhost Redis URL and FQMG_REQUIRE_* flags), but future
+          # workflow edits must not turn these channels into a leak path.
+          redact() {
+            sed -E \
+              -e 's/AKIA[A-Z0-9]{16}/[REDACTED-AWS-KEY]/g' \
+              -e 's/(sk|rk)-[A-Za-z0-9_-]{8,}/[REDACTED-KEY]/g' \
+              -e 's/gh[pousr]_[A-Za-z0-9]{20,}/[REDACTED-GITHUB-TOKEN]/g' \
+              -e 's/-----BEGIN [A-Z ]*PRIVATE KEY-----/[REDACTED-PRIVATE-KEY]/g' \
+              -e 's/(Bearer|Basic) [A-Za-z0-9._~+/-]{8,}/\1 [REDACTED]/g'
+          }
+          if [ "$rc" -ne 0 ]; then
+            grep -aE "FAIL |Error: |AssertionError|expected |→|❯ tests/|audio-unified|render-unified" /tmp/vitest-output.log | tail -40 | cut -c1-380 | redact | sed 's/^/::error::/'
+            exit "$rc"
+          fi
+          # Success path: surface the render-execution proof and the summary
+          # as notice annotations (readable via the checks API even when the
+          # log receiver is unreachable).
+          grep -aE "render-unified|audio-unified|Test Files|Tests  " /tmp/vitest-output.log | tail -8 | cut -c1-380 | redact | sed 's/^/::notice::/'
+        env:
+          FQMG_TEST_REDIS_URL: redis://127.0.0.1:6379
+          FQMG_REQUIRE_REDIS_TESTS: "1"
+          # ubuntu-24.04 runners ship ffprobe and can download the Remotion
+          # headless browser: the unified-pipeline render test must EXECUTE
+          # here, not skip (missing prerequisites would fail the run).
+          FQMG_REQUIRE_RENDER_PIPELINE: "1"
+
+      - name: Upload vitest output
+        # Failure-only: success evidence travels via notice annotations, so
+        # the full log artifact is produced (and retained) on failures only,
+        # keeping the stored-output surface minimal.
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: vitest-output-${{ github.run_id }}
+          path: /tmp/vitest-output.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Upload coverage report
         if: ${{ always() }}

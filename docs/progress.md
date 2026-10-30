@@ -255,3 +255,171 @@ allow-same-origin، CSP بلا شبكة وunsafe-eval محصور بالمعزو�
 **⚠️ مطلوب مراجعة بشرية صريحة قبل الدمج (شرط المرحلة 4):** جرّب /generate
 في متصفح حقيقي (المعاينة داخل الإطار المعزول + التقاط الإطار للشات)، وراجع
 `src/sandbox/code-validator.ts` و`src/app/preview-sandbox/page.tsx` وD-021..D-023.
+
+## المرحلة 5 — مكتملة
+
+**بوابات الجودة (فعلية، محليًا ضد Redis حقيقي 8.2.3 على 6399):**
+`npm test` (بـ FQMG_REQUIRE_REDIS_TESTS=1) → **491/491** (48 ملفًا؛ كان 476)،
+`npm run typecheck` → 0، `npm run lint` → 0، `npm run build` → 0 (14 صفحة)،
+`npm audit --omit=dev` → 0، `npm audit` → 0. اعتماديات: +`redis@6.3.1` فقط.
+
+**ما نُفذ:**
+1. `BudgetBackend` بتنفيذين — محلي (دلالات المرحلة 3 مستخرجة كما هي) وRedis
+   ذرّي (Lua للحجز/التسوية/الإفلات، micro-USD، TTL 48 ساعة/يوم و24 ساعة/حجز
+   مهجور). `BudgetLedger` أضحى مفوّضًا غير متزامن موحّد السطح؛ الرسائل وصيغها
+   لم تتغير بين الخلفيتين.
+2. `JobStateStore` Redis: مرآة سجل المهام (الحالة والنتيجة بلا
+   `AbortController`)، فهرس dedupe مشترك يمنع الطلب النشط المكرر **عبر
+   النسختين**، علم إلغاء عابر للنسخ يعبَّأ كل 1.2 ثانية، مرآة التقدم
+   مقننة (~2 كتابة/ثانية لكل مهمة).
+3. `VoiceObjectStore`: FS محلي + S3-compatible بموقّع SigV4 داخل المستودع
+   مثبّت على متجه AWS الرسمي؛ الكتابة الحصرية بـ If-None-Match؛ الكاش يقرأ
+   الحقول والمكانية من المخزن فيصبح قابلًا للمشاركة.
+4. fail-closed موثق ومختبر: مخزن مُعدّ وغير متاح ⇒ `store-unavailable` مع
+   رفض الطلب المدفوع؛ بلا `FQMG_REDIS_URL` يبقى السلوك المحلي.
+5. CI: خدمة `redis:7` + `FQMG_REQUIRE_REDIS_TESTS=1` (الخادم غير المتاح =
+   فشل، لا تخطٍّ) و`FQMG_TEST_REDIS_URL`.
+6. `.env.example`: FQMG_REDIS_URL / FQMG_SHARED_NAMESPACE / VOICE_CACHE_STORE
+   / FQMG_S3_* (قيم فارغة)، README وسطر حدود docs/api-access.md محدّثان.
+
+**الاختبارات (حمراء أولًا ضد وحدات غير موجودة):** tests/shared-state.test.ts
+(10) + tests/voice-object-store.test.ts (5) = 15 جديدة. الإجمالي 476 → 491
+(لا اختبار محذوف). أُثبت فعليًا: بقاء الحجز عبر إعادة تشغيل، ذرّية حجزين
+متوازيين (واحد فقط يفوز، 3 جولات)، سقف كل مستخدم عبر النسختين، رفض
+المكرر النشط عبر النسختين، إلغاء عابر للنسختين، fail-closed، البقاء الافتراضي
+المحلي، تكامل runtime، عقد مخزني الصوت بالكتابة الحصرية، ومتجه SigV4.
+
+**تحقق إضافي بطلب المالك — عمليتان Node حقيقيتان:** tests/two-process-shared-state.test.ts
+(3 اختبارات) تشغّل `tsx scripts/shared-state-worker.mts` كعملتي Node منفصلتين
+(spawn) تتنسقان **حصرًا عبر Redis**: الحجز المتوازي عبر العمليتين (فائز واحد
+فقط، جولتان)، رفض الطلب المكرر النشط في العملية الثانية بينما مهمة الأولى
+تكمل طبيعيًا، وإلغاء تصدره العملية B فيُجهَض تنفيذ العملية A. أُضيف إلى CI
+تلقائيًا (نفس علم FQMG_REQUIRE_REDIS_TESTS=1 يجعل تعذر الخادم فشلًا لا تخطيًا).
+الإجمالي بعدها: **494/494**.
+
+**مختبَر فعليًا vs مستنتَج/غير مختبَر:**
+- **مختبَر:** كل ما سبق ضد خادم Redis 8.2.3 حقيقي — وعلى مستوى أعمق: عمليتا
+  Node منفصلتان فعليًا (spawn) تتنسقان عبر Redis فقط، ما يقارب نشر نسختين.
+  SigV4 ضد متجه AWS الموثق، وS3 ضد خادم stub يحاكي GET/PUT/If-None-Match.
+- **غير مختبَر (مفصول):** نشر فعلي بنسختي process منفصلتين (الاختبار يحاكيهما
+  داخل العملية الواحدة)، حاوية/نقطة نهاية S3 حقيقية (AWS/MinIO) — التواقيع
+  مثبتة بالمتجه الرسمي لكن القراءة/الكتابة من مزود حقيقي تحتاج بيانات اعتماد
+  المالك، وسلوك الكشف/التنظيف الدوري لـ TTL الفعلي (المهام تنتهي بـ TTL
+  Redis؛ تنظيف الملفات المحلية يبقى دورة prune الحالية).
+
+## المرحلة 6 — توحيد البنية وفصل النشر (جارية)
+
+**الالتزام A (e8ef793) — فصل النشر عن البناء:**
+- `vercel.json`: `next build` فقط (لا remotion) — نشر Vercel لا ينتج أي أصل خارجي.
+- `scripts/deploy.mjs`: `--mode deploy` يتطلب المفاتيح ويفشل فورًا (exit 1) برسالة
+  صريحة عند غيابها؛ `--mode verify` (الافتراضي) للتحقق بلا نشر.
+- اسم الموقع الفعلي `fqmg-ohz` في `config.mjs` (بدل my-next-app)، وكل نقاط
+  الدخول (`deploy:lambda`, `remotion`, `render`, `studio`, `bundle`) تستهدف
+  `src/remotion/entry.tsx` (FQMG-OHZ-Preview، data-only). `npm run render`
+  ينتج `renders/animation.mp4`.
+
+**الالتزام B (81b0592) — حذف شيفرة التركيب القديم (نظرة grep أُريت للمالك قبل التنفيذ):**
+- 15 ملفًا حُذفت (‑1097 سطرًا): Root.tsx/DynamicComp.tsx، `compileCode` من
+  compiler.ts (لم يبقَ أي `new Function` خارج sandbox المرحلة 4)، مسارا HTTP
+  `/api/lambda/render|progress` + `src/lambda/api.ts` + `use-rendering.ts` +
+  مكونات AnimationPlayer غير المركّبة + `types/{schema,constants}.ts` +
+  سياستا Rate القديمتان.
+- التغطية حُفظت بإعادة التوجيه لا بالحذف: `fixCommonSyntaxErrors` عبر
+  `transpileGeneratedCode`؛ اختبار المرحلة 4 أثبت انتهاء المقيّم القديم
+  واستمرار مسار البيانات في sandbox المعزول end-to-end؛ api-auth يثبت أن وحدة
+  المسار المحذوفة لا يمكن استيرادها أصلًا. الجرد 494 → 491 (7 اختبارات
+  لمسارات محذوفة، موثقة في D-025). لا حذف صامت للتغطية.
+- فحص متبقٍ: grep على كل الرموز المحذوفة = إشارات تاريخية في الوثائق فقط.
+
+**اكتشافان أثناء أول تنفيذ CI حقيقي للمسار (موثقان في D-026):**
+- `rspack: true` في Remotion يجعل المجمّع يتجاهل `webpackOverride` تمامًا
+  (عداد الاستدعاء 0)، فيسقط alias `@/*` ويفشل bundle لـ entry.tsx. أُعيد
+  إنتاجه محليًا بمكالمة `bundle()` مباشرة، وأُصلح بإزالة rspack من
+  local-render-backend ومن remotion.config.ts (تحقق CLI bundle بعدها). سلوك
+  rspack يفشل لأنه لا يطبق الـ override — ليس خطأ alias.
+- تقليص القالب للاختبار كان يصفّر-يمنع startFrame=0 (Math.max(1,..)) فيكسر
+  قيد "layer timing must fit inside its scene". أُصلح: المدد فقط >= 1.
+- إعادة هيكلة: نصف "إعداد المواصفة" (shrink → parse → assess → blueprint
+  data-only) صار اختبارًا دائمًا بلا متصفح — يُنفَّذ محليًا وفي CI (كان قبلها
+  غير منفَّذ محليًا إطلاقًا بسبب التخطي).
+- قناة تشخيص CI: خطوة الاختبار تُعيد إطلاق أسطر الفشل كـ `::error::` وملخص
+  النجاح كـ `::notice::` annotations — قابلة للقراءة عبر checks API حتى حين
+  يكون مستقبِل السجلات/Artifacts معطلًا (حدث فعلًا: عائد 0 بايت). تدقيق أمان
+  القناة: مخرجات المجموعة الكاملة خالية من أي أنماط أسرار (فحص نمطي = 0)،
+  وبيئة CI بلا أسرار أصلًا (فقط Redis محلي + رايتا FQMG_REQUIRE_*)، وكل
+  أسطر annotations تمر بفلتر تعتيم (AKIA/sk-/ghp_/مفاتيح خاصة/Bearer)،
+  ورفع artifact صار عند الفشل فقط لتقليل سطح التخزين.
+
+**اختبار تكامل المسار الموحد مع بوابة ffprobe (tests/render-unified-pipeline.test.ts):**
+- يقود القالب الحقيقي عبر المسار الإنتاجي كاملًا: MotionSpecificationSchema →
+  RemotionLocalRenderBackend (bundle لـ entry.tsx + اختيار FQMG-OHZ-Preview)
+  → `verifyRenderOutput` — بوابة ffprobe الإنتاجية نفسها التي تستخدمها حلقة QA.
+- يثبت عبر seams أن inputProps المرسلة data-only (`{ spec }` كما parseها
+  المخطط) والـ composition المختار هو FQMG-OHZ-Preview حصرًا.
+- الصدق البيئي: غياب ffprobe أو Chrome Headless Shell = تخطٍّ **مع سبب
+  مسجّل**، ومع `FQMG_REQUIRE_RENDER_PIPELINE=1` = فشل. محليًا (بيئة معزولة
+  بلا متصفح): اختبار ffprobe نُفّذ فعليًا (حزمة compositor Remotion تحمل
+  ffprobe n7.1 داخل node_modules) ورندر المتصفح تَخَطّى؛ في CI (ubuntu-24.04
+  + إنترنت مفتوح): `FQMG_REQUIRE_RENDER_PIPELINE=1` يجعل الرندر الكامل
+  ينفّذ فعلًا مع استدعاء ffprobe حقيقي.
+
+**خلاصة المرحلة 6 (مكتملة):**
+- 5 التزامات: e8ef793 (فصل النشر) → 81b0592 (حذف الميت −1097 سطرًا) →
+  3505a71 (اختبار التكامل) → 8461b6c (تشخيص CI) → bcfc358 (إصلاح التقليص +
+  إعادة هيكلة) → 82fab40 (إصلاح rspack/D-026) → 77fe538 (قناة إثبات التنفيذ).
+- الاختبار النهائي: **494 اختبارًا في 49 ملفًا** (محليًا: 493 نجح + 1 تخطٍّ
+  بيئة-بلا-متصفح؛ في CI: تنفيذ كامل بما فيه الرندر). typecheck/lint/audit 0.
+- **إثبات بوابة ffprobe في CI (run 40969166437، commit 77fe538):**
+  `[render-unified] EXECUTED: ffprobe verified 162x288 @30fps, 2.00s, 6KB,
+  composition=FQMG-OHZ-Preview` — الخطوة **نُفّذت** فعلًا (ملف الاختبار 20.7s)
+  عبر `verifyRenderOutput` الإنتاجية، وليست متخطّاة.
+
+## المرحلة 7 — دمج الصوت في الفيديو النهائي (مكتملة)
+
+- **7a32658 (A):** بوابة ffprobe صوتية-الوعي: `verifyRenderOutput(filePath,
+  { expectAudio, audioToleranceSeconds=0.5 })` — يوجَد stream صوتي ومطابقة
+  مدته لمدة الفيديو ضمن الهامش، وإلا فشل مغلق برسائل صريحة؛
+  `VerifiedMediaOutput` يبلّغ عن الـ stream الصوتي؛ حلقة الوكيل تمرر
+  `expectAudio` من المواصفة (توافق عكسي: الرندرات الصامتة كما هي). +4
+  اختبارات بـ fixtures ffmpeg حقيقية (كُشف أن ffmpeg المضمّن بلا lavfi
+  فيديو → بناء الفيديو من PNG، والصوت من sine).
+- **b5fb946 (B):** المزج نفسه: `AudioTracksView` في MotionComposition على
+  الخط الزمني المطلق، مستويات/تلاشٍ عبر `audioTrackVolumeAt` النقية (5
+  اختبارات)، رفع الرفض الشامل في المحوّل مع إبقاء normalize/ducking
+  مرفوضَين (5 اختبارات)، `publicDir` في الـ backend لحل /assets الثابتة.
+  اختبار القديم في agent-render-backends أعيد توجيهه (normalize مثال
+  الرفض الباقي).
+- **bed8dd8:** إعادة توجيه اختبارين ثبّتا الرفض القديم (remotion-adapter +
+  voice-motion-integration) للعقد الجديد — اكتُشفا بتشغيل المجموعة الكاملة.
+- **dcaec5d (C):** e2e صوتي (tests/render-audio-pipeline.test.ts): tone مولّد
+  → publicDir → رندر موحد → بوابة expectAudio تتحقق من stream صوتي مطابق؛
+  وأصل تالف (2KB عشوائي) يفشل render-failed بوضوح. بوابة المتصفح: تخطٍّ
+  محلي مسبب (`[audio-unified*] SKIPPED`) وإلزام في CI
+  (FQMG_REQUIRE_RENDER_PIPELINE=1) مع annotations للإثبات.
+- **الجرد:** 494 → 510 اختبارًا (+4 بوابة، +10 مزج/assess، +2 e2e) في 52
+  ملفًا. محليًا: 507 نجح + 3 تخطٍّ (رندر المتصفح في sandbox معزول)؛
+  typecheck/lint/audit 0، build OK.
+
+**اكتمال المرحلة 7 — التزامات ونتائج:**
+- الالتزامات: 7a32658 (A: البوابة الصوتية) → b5fb946 (B: المزج) →
+  dcaec5d/bed8dd8 (C: e2e + إعادة توجيه اختبارين) → 8f0d75d (D: docs) →
+  7012605/e5782a8/911e0c2/aa6e32b (دورات تشخيص CI) → 9e6dc71 (السبب الجذري).
+- **الجرد: 494 → 510** (+4 بوابة صوتية، +5 مزج، +5 assess، +2 e2e) في 52
+  ملفًا. محليًا 507 نجح + 3 تخطٍّ (متصفح)، typecheck/lint/audit 0، build OK.
+- **إثبات التنفيذ في CI (run 40975932431، commit 9e6dc71، SUCCESS):**
+  `[audio-unified-corrupt] EXECUTED: corrupt audio asset failed the render
+  loudly` + `[render-unified] EXECUTED: ffprobe verified 162x288 @30fps,
+  2.00s, 6KB, composition=FQMG-OHZ-Preview` — خطوة الاختبار نُفِّذت فعلًا
+  (FQMG_REQUIRE_RENDER_PIPELINE=1 يجعل التخطي فشلًا) و52/52 ملفات نجحت.
+  marker المسار السعيد الصوتي كان أُقصي بنافذة tail-5 فوُسّعت إلى -8 في
+  الالتزام التوثيقي اللاحق.
+- سبب دورات الفشل الأربع موثق في D-027 (خطأ `??=` على مهيآت سلاسل فارغة —
+  لا نظريات التخزين المؤقت/التنظيف التي تراجعت).
+
+## المرحلة 8 — اختبارات شاملة ونشر ذاتي (جارية)
+
+**A (قياس + فرض العتبات):** القياس المحلي (أرضية): src/agent أسطر 80.08% /
+دوال 74.81% / فروع 72.01% — src/render 63.76/56.45/58.77 — src/voice
+85.94/88.15/70.94 (الإجمالي: أسطر 69.9%). العتبات مضبوطة عند الأرضية
+المقاسة (D-028) مع إثبات أحمر→أخضر. لاحقًا في المرحلة: يُعاد النشر في CI
+حيث التغطية أعلى (اختبارات Redis/الرندر تنفذ).

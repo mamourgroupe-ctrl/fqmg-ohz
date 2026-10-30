@@ -6,7 +6,9 @@
 import { Config } from "@remotion/cli/config";
 import { webpackOverride } from "./src/remotion/webpack-override.mjs";
 
-Config.setRspack(true);
+// Config.setRspack(true) removed (D-026): under rspack the bundler ignores
+// overrideBundlerConfig, so the `@/*` alias never applies and entry.tsx fails
+// to resolve its app imports during studio / render / deploy bundling.
 Config.setVideoImageFormat("jpeg");
 
 Config.overrideBundlerConfig(webpackOverride);

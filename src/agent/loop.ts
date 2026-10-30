@@ -198,7 +198,10 @@ export interface AgentLoopDependencies {
   priceBook: PriceBook;
   /** Test seams; each defaults to the production implementation. */
   materialize?: typeof defaultMaterializeArtifact;
-  validateMedia?: (filePath: string) => Promise<MediaValidation>;
+  validateMedia?: (
+    filePath: string,
+    options?: { expectAudio?: boolean },
+  ) => Promise<MediaValidation>;
   extractFrames?: (request: FrameExtractionRequest, options: object) => Promise<FrameExtractionResult>;
   critique?: typeof defaultCritiqueFrames;
   now?: () => number;
@@ -264,8 +267,8 @@ export async function runAgentLoop(
   const critique = dependencies.critique ?? defaultCritiqueFrames;
   const validateMedia =
     dependencies.validateMedia ??
-    (async (filePath: string): Promise<MediaValidation> =>
-      mediaSummary(await verifyRenderOutput(filePath)));
+    (async (filePath: string, options?: { expectAudio?: boolean }): Promise<MediaValidation> =>
+      mediaSummary(await verifyRenderOutput(filePath, options)));
   const workDir = dependencies.workDir ?? defaultWorkDir;
   const rubric = getCritiqueRubricLines();
 
@@ -476,7 +479,9 @@ export async function runAgentLoop(
     report("validating", iteration);
     let media: MediaValidation;
     try {
-      media = await validateMedia(materialized.filePath);
+      media = await validateMedia(materialized.filePath, {
+        expectAudio: specification.audio.tracks.length > 0,
+      });
     } catch (error) {
       record.failureReason = "validation-failed";
       failureReason = "validation-failed";
@@ -608,7 +613,7 @@ export async function runAgentLoop(
       estimatedCostUsd = (estimatedCostUsd ?? 0) + critiqueEstimate.usd;
     }
 
-    const critiqueReservation = budget.reserve({
+    const critiqueReservation = await budget.reserve({
       taskId: `${jobId.data}:critique:${iteration}`,
       estimate: critiqueEstimate,
       ...(request.approval ? { approval: request.approval } : {}),
@@ -651,7 +656,7 @@ export async function runAgentLoop(
         },
         ...(request.signal ? { signal: request.signal } : {}),
       });
-      budget.settle(critiqueReservation.reservationId);
+      await budget.settle(critiqueReservation.reservationId);
     } catch (error) {
       const code = error instanceof VisionCritiqueError ? error.code : "provider-failed";
       const beforeDispatch =
@@ -661,10 +666,10 @@ export async function runAgentLoop(
         code === "payload-too-large" ||
         (code === "provider-cancelled" && isCancelled());
       if (beforeDispatch) {
-        budget.release(critiqueReservation.reservationId);
+        await budget.release(critiqueReservation.reservationId);
       } else {
         // The request may have reached the provider: charge the estimate rather than under-count.
-        budget.settle(critiqueReservation.reservationId);
+        await budget.settle(critiqueReservation.reservationId);
       }
 
       if (code === "provider-cancelled" && isCancelled()) {
@@ -771,7 +776,7 @@ export async function runAgentLoop(
       record.costEstimateUsd = (record.costEstimateUsd ?? 0) + (repairEstimate?.usd ?? 0);
       if (repairEstimate) estimatedCostUsd = (estimatedCostUsd ?? 0) + repairEstimate.usd;
 
-      const repairReservation = budget.reserve({
+      const repairReservation = await budget.reserve({
         taskId: `${jobId.data}:repair:${iteration}`,
         estimate: repairEstimate,
         ...(request.approval ? { approval: request.approval } : {}),
@@ -797,20 +802,20 @@ export async function runAgentLoop(
           signal: request.signal ?? new AbortController().signal,
         });
         repairedSpecification = validateRepairCandidate(specification, proposal);
-        budget.settle(repairReservation.reservationId);
+        await budget.settle(repairReservation.reservationId);
         repairProviderId = repairProvider.id;
         appliedRuleIds = [...new Set(issues.map((issue) => issue.code))];
         unrepairableRuleIds = [];
       } catch (error) {
         const cancelled = isCancelled();
         if (cancelled) {
-          budget.release(repairReservation.reservationId);
+          await budget.release(repairReservation.reservationId);
           status = "cancelled";
           failureReason = "cancelled";
           record.failureReason = "cancelled";
           break;
         }
-        budget.settle(repairReservation.reservationId);
+        await budget.settle(repairReservation.reservationId);
         failureReason = "repair-failed";
         record.failureReason = "repair-failed";
         status = "needs_review";
@@ -874,9 +879,14 @@ export async function runAgentLoop(
     disclosures.push("A downloaded Lambda artifact is retained locally only for the review preview.");
   }
 
-  if (budget.snapshot().enforcement === "process-local") {
+  const budgetSnapshot = await budget.snapshot();
+  if (budgetSnapshot.enforcement === "process-local") {
     disclosures.push(
       "Budget reservations are process-local: they are not shared across server instances and do not replace the provider's invoice.",
+    );
+  } else {
+    disclosures.push(
+      "Budget reservations are enforced through the shared store, which bounds what this application spends; it is still not a guarantee of the provider's invoice.",
     );
   }
 
@@ -900,7 +910,7 @@ export async function runAgentLoop(
     stage,
     failureReason,
     errorMessage,
-    budget: budget.snapshot(),
+    budget: budgetSnapshot,
     estimatedCostUsd,
     iterationsLog,
     disclosures,

@@ -47,6 +47,7 @@
     "next": "16.4.1",
     "react": "19.2.1",
     "react-dom": "19.2.1",
+    "redis": "^6.3.1",
     "remotion": "4.0.534",
     "tailwind-merge": "3.4.0",
     "three": "0.178.0",
@@ -91,15 +92,15 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "auth:hash": "tsx scripts/hash-password.mts",
-    "remotion": "remotion studio src/remotion/index.ts",
+    "remotion": "remotion studio src/remotion/entry.tsx",
     "studio": "remotion studio src/remotion/entry.tsx",
-    "render": "remotion render src/remotion/index.ts",
+    "render": "remotion render src/remotion/entry.tsx FQMG-OHZ-Preview renders/animation.mp4",
     "bundle:remotion": "remotion bundle src/remotion/entry.tsx",
     "render:preview": "remotion render src/remotion/entry.tsx FQMG-OHZ-Preview renders/phase-one-preview.mp4",
     "agent:frame-smoke": "tsx scripts/agent-frame-smoke.mts",
     "voice:live-check": "tsx scripts/voice-live-check.ts",
     "voice:live-check:plan": "tsx scripts/voice-live-check.ts --plan",
-    "deploy": "node deploy.mjs"
+    "deploy:lambda": "node deploy.mjs"
   },
   "overrides": {
     "zod": "^4.6.7",

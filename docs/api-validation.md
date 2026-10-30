@@ -39,3 +39,8 @@
 `useImageAttachments`: ≤4 صور، ≤2MB للصورة، وPNG/JPEG فقط (`accept` في `ChatInput` محصور
 كذلك) — مطابقة عمدًا لحدود الخادم في `GENERATE_IMAGE_LIMITS`؛ الخادم يتحقق فعلًا بالبايتات
 الحقيقية ولو تجاوز العميل.
+
+> **تحديث المرحلة 6:** صفّا `/api/lambda/render` و`/api/lambda/progress` أعلاه
+> لم يعدا موجودين — حُذفا مع تركيب `DynamicComp` القديم (شيفرة ميتة). بقية
+> الصف سارية؛ وتغطية `executeApi` (400/413/500) باقية عبر اختبارات مسار plan
+> ومساعدي api-response.

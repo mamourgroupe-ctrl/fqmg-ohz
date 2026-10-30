@@ -103,7 +103,7 @@ function jobContext(jobId: string) {
 
 async function waitForSettled(jobId: string): Promise<AgentJobRecord> {
   for (let attempt = 0; attempt < 400; attempt += 1) {
-    const job = runtime().store.getJob(jobId);
+    const job = await runtime().store.getJob(jobId);
     if (job && !ACTIVE_JOB_STATUSES.includes(job.status)) return job;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
@@ -123,20 +123,17 @@ async function makeDirectory(prefix = "fqmg-qa-"): Promise<string> {
  */
 async function startJobWithArtifact(artifact: LocalFileArtifact): Promise<AgentJobRecord> {
   const { store } = runtime();
-  const job = store.startJob({
+  const job = await store.startJob({
     taskId: "qa:test",
     dedupeKey: `test:${randomUUID()}`,
-    budgetSnapshot: () => {
-      const snapshot = runtime().budget.snapshot();
-      return {
-        dailyCommittedUsd: snapshot.dailyCommittedUsd,
-        dailyLimitUsd: snapshot.dailyLimitUsd,
-        taskLimitUsd: snapshot.taskLimitUsd,
-        activeReservations: snapshot.activeReservations,
-        enforcement: "process-local" as const,
-        invoiceGuarantee: false as const,
-      };
-    },
+    budgetSnapshot: () => ({
+      dailyCommittedUsd: 0,
+      dailyLimitUsd: 0.25,
+      taskLimitUsd: 0.03,
+      activeReservations: 0,
+      enforcement: "process-local" as const,
+      invoiceGuarantee: false as const,
+    }),
     run: async (): Promise<AgentLoopResult> =>
       ({
         status: "needs_review",
@@ -417,7 +414,7 @@ describe("GET /api/agent/qa/:jobId/preview", () => {
   });
 
   it("never proxies a remote artifact and reports an unknown job", async () => {
-    const remote = runtime().store.startJob({
+    const remote = await runtime().store.startJob({
       taskId: "qa:remote",
       dedupeKey: `remote:${randomUUID()}`,
       budgetSnapshot: () => ({

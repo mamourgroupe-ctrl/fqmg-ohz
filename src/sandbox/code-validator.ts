@@ -158,6 +158,37 @@ const FORBIDDEN_MEMBER_NAMES: ReadonlySet<string> = new Set([
   "importScripts",
 ]);
 
+/**
+ * Violation name for member access the validator cannot prove safe
+ * (obj[key], arr[arr.length - 1], list[fn()]). Surfaced verbatim in the
+ * preview error, so it carries the fix hint for the model/user.
+ */
+export const DYNAMIC_INDEX_VIOLATION_NAME =
+  "dynamic-index (runtime-computed keys are not allowed; use a constant index like items[0] or a quoted property like obj[\"width\"])";
+
+/**
+ * True when the expression is provably a NUMBER at validation time (numeric
+ * literals, unary minus, and pure arithmetic over numeric literals). A number
+ * can never equal a string-named escape property ("constructor", "__proto__",
+ * ...), so indexing with it is exactly as safe as a fixed array index.
+ */
+function isProvablyNumeric(node: BabelNodeLike | undefined): boolean {
+  if (!node) return false;
+  if (node.type === "NumericLiteral") return true;
+  if (node.type === "UnaryExpression" && node.operator === "-") {
+    return isProvablyNumeric(node.argument as BabelNodeLike | undefined);
+  }
+  if (node.type === "BinaryExpression" && node.left && node.right) {
+    const operator = String(node.operator ?? "");
+    return (
+      ["+", "-", "*", "/", "%", "**"].includes(operator) &&
+      isProvablyNumeric(node.left as BabelNodeLike | undefined) &&
+      isProvablyNumeric(node.right as BabelNodeLike | undefined)
+    );
+  }
+  return false;
+}
+
 const IMPORT_STATEMENT_PATTERNS = [
   /^\s*import\s+type\s*\{/m,
   /^\s*import\s*["']/m,
@@ -385,12 +416,19 @@ export function validateGeneratedCode(body: string): CodeValidationResult {
         const literalName =
           property?.type === "StringLiteral" && typeof property.value === "string"
             ? property.value
-            : undefined;
+            : property?.type === "TemplateLiteral" &&
+                Array.isArray(property.expressions) &&
+                property.expressions.length === 0 &&
+                typeof (property.quasis as Array<{ value?: { cooked?: unknown } }> | undefined)?.[0]?.value?.cooked === "string"
+              ? ((property.quasis as Array<{ value: { cooked: string } }>)[0].value.cooked as string)
+              : undefined;
         if (literalName !== undefined && FORBIDDEN_MEMBER_NAMES.has(literalName)) {
           violations.push({ kind: "computed-access", name: literalName });
-        } else if (literalName === undefined) {
-          // dynamic member access cannot be proven safe — reject
-          violations.push({ kind: "computed-access", name: "computed-access" });
+        } else if (literalName === undefined && !isProvablyNumeric(property)) {
+          // Dynamic member access cannot be proven safe — reject with an
+          // actionable name. Constant numeric indexing stays allowed: a
+          // number can never name an escape property.
+          violations.push({ kind: "computed-access", name: DYNAMIC_INDEX_VIOLATION_NAME });
         }
       } else if (property?.type === "Identifier" && typeof property.name === "string") {
         if (FORBIDDEN_MEMBER_NAMES.has(property.name)) {

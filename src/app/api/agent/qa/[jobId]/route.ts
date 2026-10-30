@@ -38,7 +38,7 @@ export async function GET(
   }
 
   const runtime = getAgentRuntime();
-  const job = runtime.store.getJob(jobId);
+  const job = await runtime.store.getJob(jobId);
   if (!job) {
     return errorResponse(
       "JOB_NOT_FOUND",
@@ -50,7 +50,7 @@ export async function GET(
     return forbiddenResponse();
   }
 
-  const snapshot = runtime.budget.snapshot();
+  const snapshot = await runtime.budget.snapshot();
   const view = job.view ?? toAgentJobView(job, {
     dailyCommittedUsd: snapshot.dailyCommittedUsd,
     dailyLimitUsd: snapshot.dailyLimitUsd,
@@ -77,13 +77,13 @@ export async function DELETE(
   }
 
   const runtime = getAgentRuntime();
-  const existing = runtime.store.getJob(jobId);
+  const existing = await runtime.store.getJob(jobId);
   if (isAuthEnforced() && existing?.owner && existing.owner !== auth.user.username) {
     return forbiddenResponse();
   }
   const cancelled = runtime.store.cancelJob(jobId);
   if (!cancelled) {
-    const job = runtime.store.getJob(jobId);
+    const job = await runtime.store.getJob(jobId);
     if (!job) {
       return errorResponse(
         "JOB_NOT_FOUND",

@@ -29,8 +29,17 @@ export class RemotionAdapter implements RendererAdapter<RemotionCompositionBluep
     if (parsed.data.render.engine !== this.engineId) {
       reasons.push(`The requested engine is ${parsed.data.render.engine}, not remotion.`);
     }
-    if (parsed.data.audio.tracks.length > 0) {
-      reasons.push("Audio mixing is not implemented; audio-bearing projects cannot be rendered yet.");
+    // Phase 7: audio mixing is implemented (timing, gain, fades), so tracks
+    // are renderable — but the assessment still fails closed on anything the
+    // mixer does not implement. Track->asset integrity (must reference an
+    // existing audio/video asset, track inside the timeline) is enforced by
+    // MotionSpecificationSchema itself, whose issues surface as reasons
+    // through the safeParse branch above.
+    if (parsed.data.audio.normalize) {
+      reasons.push("Audio normalization is not implemented; set audio.normalize = false.");
+    }
+    if (parsed.data.audio.ducking) {
+      reasons.push("Audio ducking is not implemented; set audio.ducking = false.");
     }
     if (parsed.data.subtitles.enabled && parsed.data.subtitles.cues.length > 0) {
       reasons.push("Subtitle rendering is reserved for the subtitle phase.");

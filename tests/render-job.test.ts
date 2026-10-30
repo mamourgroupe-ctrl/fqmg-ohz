@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -114,5 +114,107 @@ describe("render job integrity", () => {
     const filePath = path.join(temporaryDirectory, "preview.bin");
     await writeFile(filePath, "placeholder");
     await expect(verifyRenderOutput(filePath)).rejects.toThrow(".mp4 or .webm");
+  });
+});
+
+describe("audio-aware ffprobe gate (phase 7)", () => {
+  function requireBundledBinaries(): void {
+    if (!bundledFfmpeg || !bundledFfprobe) {
+      throw new Error("Remotion's bundled ffmpeg and ffprobe are required for the audio gate tests.");
+    }
+  }
+
+  /**
+   * The Remotion-bundled ffmpeg has no lavfi VIDEO sources (no testsrc), so
+   * the video stream is built from the synthetic PNG like the smoke test
+   * above; the lavfi sine audio source works and drives the audio stream.
+   * Without -shortest, a shorter sine simply yields a shorter audio stream
+   * inside the full-length video container (the divergence case).
+   */
+  function synthesizeMp4(options: { videoSeconds: number; audioSeconds?: number }): string {
+    requireBundledBinaries();
+    const stem = Math.random().toString(36).slice(2);
+    const framePath = path.join(temporaryDirectory, `frame-${stem}.png`);
+    const outputPath = path.join(temporaryDirectory, `fixture-${stem}.mp4`);
+    writeFileSync(framePath, syntheticPngFrame);
+    const frameCount = Math.round(options.videoSeconds * 24);
+    const videoArgs = [
+      "-hide_banner", "-loglevel", "error",
+      "-loop", "1", "-framerate", "24", "-i", framePath,
+    ];
+    const audioArgs = options.audioSeconds === undefined
+      ? []
+      : ["-f", "lavfi", "-i", `sine=frequency=440:duration=${options.audioSeconds}`];
+    const codecArgs = [
+      "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+      ...(options.audioSeconds === undefined ? [] : ["-c:a", "aac"]),
+    ];
+    execFileSync(
+      bundledFfmpeg as string,
+      [
+        ...videoArgs, ...audioArgs, ...codecArgs,
+        "-frames:v", String(frameCount), "-movflags", "+faststart", "-y", outputPath,
+      ],
+      { timeout: 60_000 },
+    );
+    return outputPath;
+  }
+
+  it("verifies an audio-bearing MP4 when expectAudio is requested", async () => {
+    temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "fqmg-audio-gate-"));
+    const outputPath = synthesizeMp4({ videoSeconds: 1, audioSeconds: 1 });
+
+    const verified = await verifyRenderOutput(outputPath, { expectAudio: true });
+    expect(verified.audio).toBeDefined();
+    expect(verified.audio?.streamCount).toBe(1);
+    expect(verified.audio?.codec.length).toBeGreaterThan(0);
+    expect(verified.audio?.durationSeconds).toBeCloseTo(1, 1);
+  });
+
+  it("rejects audio-expected output that carries no audio stream", async () => {
+    temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "fqmg-audio-gate-"));
+    const outputPath = synthesizeMp4({ videoSeconds: 1 });
+
+    await expect(
+      verifyRenderOutput(outputPath, { expectAudio: true }),
+    ).rejects.toThrow(/audio/i);
+  });
+
+  it("rejects an audio stream whose duration diverges from the video beyond the tolerance", async () => {
+    temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "fqmg-audio-gate-"));
+    const outputPath = synthesizeMp4({ videoSeconds: 2, audioSeconds: 0.5 });
+
+    await expect(
+      verifyRenderOutput(outputPath, { expectAudio: true }),
+    ).rejects.toThrow(/duration/i);
+
+    // A tolerance that covers the divergence accepts the same file.
+    const verified = await verifyRenderOutput(outputPath, {
+      expectAudio: true,
+      audioToleranceSeconds: 2,
+    });
+    expect(verified.audio?.durationSeconds).toBeCloseTo(0.5, 1);
+  });
+
+  it("completeRenderJobWithOutput forwards the audio expectation", async () => {
+    temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "fqmg-audio-gate-"));
+    const silent = synthesizeMp4({ videoSeconds: 1 });
+    await expect(
+      completeRenderJobWithOutput({
+        id: "render-audio-1",
+        projectId: "project-audio",
+        engine: "remotion",
+        createdAt: "2026-10-09T00:00:00.000Z",
+      }, silent, { expectAudio: true }),
+    ).rejects.toThrow(/audio/i);
+
+    const audible = synthesizeMp4({ videoSeconds: 1, audioSeconds: 1 });
+    const completed = await completeRenderJobWithOutput({
+      id: "render-audio-2",
+      projectId: "project-audio",
+      engine: "remotion",
+      createdAt: "2026-10-09T00:00:00.000Z",
+    }, audible, { expectAudio: true });
+    expect(completed).toMatchObject({ status: "succeeded", progress: 100 });
   });
 });
