@@ -44,21 +44,19 @@ export interface LocalRenderBackendOptions {
    */
   publicDir?: string;
   /**
-   * Disable Remotion's content-hash bundle cache. Parallel test workers
-   * bundling the same entry point share the cached directory otherwise,
-   * which makes per-backend publicDir copies collide (phase 7 debugging).
+   * Disable Remotion's content-hash bundle cache (default: enabled). Backends
+   * with their own publicDir/bundleOutputDir should disable it so parallel
+   * renders never share one bundle directory and overwrite each other's
+   * copied media (D-027).
    */
   bundleCaching?: boolean;
   /**
-   * Dedicated bundle output directory (Remotion `outDir`). Use this to keep
-   * the bundle OUT of Remotion's shared /tmp/remotion-webpack-bundle-*
-   * namespace: parallel renders can trigger its cleanup while a render is
-   * still reading the directory (observed in CI as a mid-render 404 for a
-   * copied asset, D-027). Absolute path; caching is force-disabled with it.
+   * Dedicated bundle output directory (Remotion `outDir`). Keeps the bundle
+   * out of Remotion's shared /tmp/remotion-webpack-bundle-* namespace so
+   * concurrent renders never resolve against another worker's directory
+   * (D-027). Absolute path; caching is force-disabled with it.
    */
   bundleOutputDir?: string;
-  /** Invoked once the bundle directory is ready (after the publicDir copy). */
-  onBundleReady?: (serveUrl: string) => void;
   /** Test seams. */
   bundleFn?: typeof bundle;
   selectCompositionFn?: typeof selectComposition;
@@ -123,7 +121,6 @@ export class RemotionLocalRenderBackend implements RenderBackend {
   private readonly publicDir?: string;
   private readonly bundleCaching: boolean;
   private readonly bundleOutputDir?: string;
-  private readonly onBundleReady?: (serveUrl: string) => void;
   private readonly bundleFn: typeof bundle;
   private readonly selectCompositionFn: typeof selectComposition;
   private readonly renderMediaFn: typeof renderMedia;
@@ -140,7 +137,6 @@ export class RemotionLocalRenderBackend implements RenderBackend {
     this.publicDir = options.publicDir;
     this.bundleCaching = options.bundleCaching ?? true;
     this.bundleOutputDir = options.bundleOutputDir;
-    this.onBundleReady = options.onBundleReady;
     this.bundleFn = options.bundleFn ?? bundle;
     this.selectCompositionFn = options.selectCompositionFn ?? selectComposition;
     this.renderMediaFn = options.renderMediaFn ?? renderMedia;
@@ -171,7 +167,6 @@ export class RemotionLocalRenderBackend implements RenderBackend {
         if (this.publicDir) {
           await fsCp(this.publicDir, serveUrl, { recursive: true });
         }
-        this.onBundleReady?.(serveUrl);
         return serveUrl;
       })
       .catch((error: unknown) => {

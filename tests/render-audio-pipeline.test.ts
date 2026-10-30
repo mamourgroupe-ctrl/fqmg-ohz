@@ -1,7 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
-import { existsSync, readdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -117,7 +116,6 @@ describe("unified render pipeline with audio mixing (phase 7)", () => {
   let outputDir = "";
   let publicDir = "";
   let ownBundleDir = "";
-  let bundleDir = "";
   let browserReady = false;
   let browserFailure = "";
 
@@ -211,36 +209,13 @@ describe("unified render pipeline with audio mixing (phase 7)", () => {
         bundleOutputDir: (ownBundleDir ||= await fs.mkdtemp(
           path.join(os.tmpdir(), "fqmg-audio-bundle-"),
         )),
-        onBundleReady: (serveUrl) => {
-          bundleDir = serveUrl;
-        },
       });
 
-      let artifact;
-      try {
-        artifact = await backend.render({
-          jobId: `audio-${randomUUID()}`,
-          specification,
-          timeoutMs: 480_000,
-        });
-      } catch (error) {
-        // Re-throw WITH the served directory state: CI annotations carry
-        // this message verbatim, so a 404 mystery is self-describing.
-        const state = bundleDir
-          ? `bundleDir=${bundleDir} assetsDirExists=${existsSync(path.join(bundleDir, "assets"))} ` +
-            `listing=${(() => {
-              try {
-                return readdirSync(bundleDir).slice(0, 20).join(",");
-              } catch (e) {
-                return `unreadable: ${(e as Error).message}`;
-              }
-            })()}`
-          : "onBundleReady never fired";
-        throw new Error(
-          `[audio-unified] render failed; ${state}; original error: ` +
-            (error instanceof Error ? error.message : String(error)),
-        );
-      }
+      const artifact = await backend.render({
+        jobId: `audio-${randomUUID()}`,
+        specification,
+        timeoutMs: 480_000,
+      });
       expect(artifact.kind).toBe("local-file");
 
       const verified = await verifyRenderOutput((artifact as { absolutePath: string }).absolutePath, {
