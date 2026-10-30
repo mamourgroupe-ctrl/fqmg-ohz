@@ -27,13 +27,30 @@ beforeAll(async () => {
   try {
     const { createClient } = await import("redis");
     const probe = createClient({
-      socket: { connectTimeout: 2_000 },
+      socket: {
+        connectTimeout: 2_000,
+        // A dead port must REJECT, not retry forever: node-redis's default
+        // reconnectStrategy keeps retrying and connect() then hangs past
+        // connectTimeout, which turned the intended skip into a hook timeout
+        // (observed on a restored sandbox where the port is silently
+        // dropped instead of refused). REQUIRE mode still fails the suite.
+        reconnectStrategy: false,
+      },
       url: REDIS_URL,
     });
     probe.on("error", () => undefined);
-    await probe.connect();
-    await probe.ping();
-    await probe.quit();
+    // Hard cap on top of connectTimeout: skip decisions must never hang.
+    await Promise.race([
+      (async () => {
+        await probe.connect();
+        await probe.ping();
+        await probe.quit();
+      })(),
+      new Promise((_, reject) => {
+        const timer = setTimeout(() => reject(new Error("redis probe timed out")), 4_000);
+        timer.unref?.();
+      }),
+    ]);
     redisAvailable = true;
   } catch (error) {
     redisProbeError = error instanceof Error ? error.message : String(error);
